@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/${{ matrix.dir }}
-          mv target/${{ matrix.target }}/release/geph5-client artifacts/${{ matrix.dir }}/
+          mv target/${{ matrix.target }}/release/geph5-client* artifacts/${{ matrix.dir }}/
 
       - name: Install cargo-bundle
         if: matrix.os == 'macos-latest'
