@@ -53,7 +53,7 @@ jobs:
 
       - name: Build client
         run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ] || [ "${{ matrix.target }}" = "i686-pc-windows-msvc" ]; then
             cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
           else
             cargo build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
