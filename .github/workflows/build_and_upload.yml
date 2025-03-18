@@ -42,7 +42,7 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Install cross (only for arm64)
-        if: ${{ matrix.target == 'aarch64-unknown-linux-musl' }}
+        if: ${{ matrix.target == 'aarch64-unknown-linux-musl' || matrix.target == 'i686-pc-windows-msvc' }}
         run: cargo install cross
 
       - name: Cache cargo build
@@ -52,6 +52,7 @@ jobs:
           prefix-key: "lele"
 
       - name: Build client
+        shell: bash
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
             cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
