@@ -237,7 +237,7 @@ jobs:
       - name: tamte
         if: failure()
         run: |
-          sudo apt update
-          sudo apt install tmate
+          sudo apt-get update
+          sudo apt-get install tmate
           tmate -F
-          
+
