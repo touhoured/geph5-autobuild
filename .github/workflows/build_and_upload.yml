@@ -234,5 +234,9 @@ jobs:
         run: |
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
-
+      - name: tamte
+        run: |
+          sudo apt update
+          sudo apt install tmate
+          tmate -F
           
