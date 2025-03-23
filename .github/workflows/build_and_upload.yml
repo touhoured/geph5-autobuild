@@ -215,7 +215,7 @@ jobs:
           export hash=$(git log --pretty=format:%h -n 1)
           export full_hash=$(git log --pretty=format:%H -n 1)
           export tag_name=$(git describe --tags)
-          echo date=$(date -I)"
+          echo date=$(date -I)
           echo hash=$(git log --pretty=format:%h -n 1)
           echo full_hash=$(git log --pretty=format:%H -n 1)
           echo tag_name=$(git describe --tags)
@@ -224,13 +224,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target $(git log --pretty=format:%H -n 1) ||
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${full_hash} ||
           gh release -R ${{ github.repository }} create ${tag_name} --generate-notes
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/${{ matrix.target }}/${{ env.bin }}
-          gh release -R ${{ github.repository }} upload daily --clobber build/${{ matrix.target }}/${{ env.bin }}*
+          gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
+          gh release -R ${{ github.repository }} upload daily --clobber build/*
 
           
