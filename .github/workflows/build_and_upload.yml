@@ -195,6 +195,8 @@ jobs:
 
   release:
     needs: [build, build-bridge-exit]
+    permissions:
+      contents: write
     runs-on: ubuntu-20.04
     steps:
       - name: Download all artifacts
