@@ -113,7 +113,7 @@ jobs:
         with:
           repository: ${{ env.upstream }}
           fetch-depth: 0
-          submodules: "recursive".
+          submodules: "recursive"
 
       - name: Install musl-tools
         run: sudo apt-get install -y musl-tools
