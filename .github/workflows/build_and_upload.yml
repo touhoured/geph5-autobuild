@@ -202,16 +202,14 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: build
       - name: Checkout
         uses: actions/checkout@v3
         with:
           repository: ${{ env.upstream }}
           fetch-depth: 0
-          submodules: "build"
+          submodules: "recursive"
       - name: Get environment variable
-        id: getenv
-        shell: bash
         run: |
           date=$(date -I)" >> "${GITHUB_ENV}"
           echo "hash=$(git log --pretty=format:%h -n 1)" >> "${GITHUB_ENV}"
