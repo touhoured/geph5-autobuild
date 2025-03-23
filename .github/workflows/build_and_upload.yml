@@ -217,15 +217,17 @@ jobs:
           echo "hash=$(git log --pretty=format:%h -n 1)" >> "${GITHUB_ENV}"
           echo "full_hash=$(git log --pretty=format:%H -n 1)" >> "${GITHUB_ENV}"
           echo "tag_name=$(git describe --tags)" >> "${GITHUB_ENV}"
-          echo date=$(date -I)
-          echo hash=$(git log --pretty=format:%h -n 1)
-          echo full_hash=$(git log --pretty=format:%H -n 1)
-          echo tag_name=$(git describe --tags)
+          echo "date=$(date -I)"
+          echo "hash=$(git log --pretty=format:%h -n 1)"
+          echo "full_hash=$(git log --pretty=format:%H -n 1)"
+          echo "tag_name=$(git describe --tags)"
       - name: Create tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
+          gh release -R ${{ github.repository }} delete daily -y --cleanup-tag
+          gh release -R ${{ github.repository }} create daily --generate-notes
           gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${full_hash} ||
           gh release -R ${{ github.repository }} create ${tag_name} --generate-notes
       - name: Upload assets
