@@ -213,10 +213,10 @@ jobs:
         id: getenv
         shell: bash
         run: |
-          export date=$(date -I)
-          export hash=$(git log --pretty=format:%h -n 1)
-          export full_hash=$(git log --pretty=format:%H -n 1)
-          export tag_name=$(git describe --tags)
+          date=$(date -I)" >> "${GITHUB_ENV}"
+          echo "hash=$(git log --pretty=format:%h -n 1)" >> "${GITHUB_ENV}"
+          echo "full_hash=$(git log --pretty=format:%H -n 1)" >> "${GITHUB_ENV}"
+          echo "tag_name=$(git describe --tags)" >> "${GITHUB_ENV}"
           echo date=$(date -I)
           echo hash=$(git log --pretty=format:%h -n 1)
           echo full_hash=$(git log --pretty=format:%H -n 1)
