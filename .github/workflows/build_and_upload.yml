@@ -219,6 +219,15 @@ jobs:
           echo "hash=$(git log --pretty=format:%h -n 1)"
           echo "full_hash=$(git log --pretty=format:%H -n 1)"
           echo "tag_name=$(git describe --tags)"
+
+      - name: tamte
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install tmate
+          tmate -F
+
       - name: Create tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -234,10 +243,3 @@ jobs:
         run: |
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
-      - name: tamte
-        if: failure()
-        run: |
-          sudo apt-get update
-          sudo apt-get install tmate
-          tmate -F
-
