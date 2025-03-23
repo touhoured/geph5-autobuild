@@ -1,6 +1,14 @@
 name: Build and Upload
 
-on: [push]
+on:
+  push:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  upstream: geph-official/geph5
+  bin: geph5-client
 
 jobs:
   build:
@@ -26,8 +34,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.upstream }}
+          fetch-depth: 0
+          submodules: "recursive"
 
       - name: Install musl-tools (Linux)
         if: ${{ matrix.dir == 'musl' }}
@@ -96,8 +108,12 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: ${{ env.upstream }}
+          fetch-depth: 0
+          submodules: "recursive".
 
       - name: Install musl-tools
         run: sudo apt-get install -y musl-tools
@@ -176,3 +192,45 @@ jobs:
       - name: Upload to Cloudflare R2
         run: |
           rclone copy -P ./artifacts/ r2:geph5/
+
+  release:
+    needs: [build, build-bridge-exit]
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+          fetch-depth: 0
+          submodules: "build"
+      - name: Get environment variable
+        id: getenv
+        shell: bash
+        run: |
+          export date=$(date -I)
+          export hash=$(git log --pretty=format:%h -n 1)
+          export full_hash=$(git log --pretty=format:%H -n 1)
+          export tag_name=$(git describe --tags)
+          echo date=$(date -I)"
+          echo hash=$(git log --pretty=format:%h -n 1)
+          echo full_hash=$(git log --pretty=format:%H -n 1)
+          echo tag_name=$(git describe --tags)
+      - name: Create tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: |
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target $(git log --pretty=format:%H -n 1) ||
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes
+      - name: Upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/${{ matrix.target }}/${{ env.bin }}
+          gh release -R ${{ github.repository }} upload daily --clobber build/${{ matrix.target }}/${{ env.bin }}*
+
+          
