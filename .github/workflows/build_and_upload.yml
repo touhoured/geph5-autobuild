@@ -211,7 +211,7 @@ jobs:
           submodules: "recursive"
       - name: Get environment variable
         run: |
-          date=$(date -I)" >> "${GITHUB_ENV}"
+          date="date=$(date -I)" >> "${GITHUB_ENV}"
           echo "hash=$(git log --pretty=format:%h -n 1)" >> "${GITHUB_ENV}"
           echo "full_hash=$(git log --pretty=format:%H -n 1)" >> "${GITHUB_ENV}"
           echo "tag_name=$(git describe --tags)" >> "${GITHUB_ENV}"
