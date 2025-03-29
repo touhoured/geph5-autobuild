@@ -199,35 +199,26 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: build
       - name: Checkout
         uses: actions/checkout@v3
         with:
           repository: ${{ env.upstream }}
           fetch-depth: 0
           submodules: "recursive"
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build
       - name: Get environment variable
         run: |
-          date="date=$(date -I)" >> "${GITHUB_ENV}"
-          echo "hash=$(git log --pretty=format:%h -n 1)" >> "${GITHUB_ENV}"
-          echo "full_hash=$(git log --pretty=format:%H -n 1)" >> "${GITHUB_ENV}"
-          echo "tag_name=$(git describe --tags)" >> "${GITHUB_ENV}"
-          echo "date=$(date -I)"
-          echo "hash=$(git log --pretty=format:%h -n 1)"
-          echo "full_hash=$(git log --pretty=format:%H -n 1)"
-          echo "tag_name=$(git describe --tags)"
-
-      - name: tamte
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install tmate
-          tmate -F
-
+          date=$(date -I)
+          hash=$(git log --pretty=format:%H -n 1)
+          short_hash=$(git log --pretty=format:%h -n 1)
+          tag_name=$(git describe --tags --match geph5-client\*)
+          echo "data=${date}" >> "${GITHUB_ENV}"
+          echo "hash=${hash}" >> "${GITHUB_ENV}"
+          echo "short_hash=${short_hash}" >> "${GITHUB_ENV}"
+          echo "tag_name=${tag_name}" >> "${GITHUB_ENV}"
       - name: Create tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -235,7 +226,7 @@ jobs:
         run: |
           gh release -R ${{ github.repository }} delete daily -y --cleanup-tag
           gh release -R ${{ github.repository }} create daily --generate-notes
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${full_hash} ||
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${short_hash} ||
           gh release -R ${{ github.repository }} create ${tag_name} --generate-notes
       - name: Upload assets
         env:
@@ -243,3 +234,12 @@ jobs:
         run: |
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
+
+      - name: tamte
+        if: failure()
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install tmate
+          tmate -F
