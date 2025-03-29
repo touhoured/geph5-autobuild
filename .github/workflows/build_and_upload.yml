@@ -209,6 +209,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: build
+      - name: rename file
+        run: |
+          find build -mindepth 1 -type f -printf '%p %h-%f\n' | xargs -n2 mv
+          find build -mindepth 1 -type d | xargs rm -r
       - name: Get environment variable
         run: |
           date=$(date -I)
