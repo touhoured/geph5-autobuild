@@ -218,7 +218,7 @@ jobs:
           date=$(date -I)
           hash=$(git log --pretty=format:%H -n 1)
           short_hash=$(git log --pretty=format:%h -n 1)
-          tag_name=$(git describe --tags --match geph5-client\*)
+          tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*)
           echo "data=${date}" >> "${GITHUB_ENV}"
           echo "hash=${hash}" >> "${GITHUB_ENV}"
           echo "short_hash=${short_hash}" >> "${GITHUB_ENV}"
@@ -233,9 +233,11 @@ jobs:
           gh release -R ${{ github.repository }} create daily --generate-notes
           gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${short_hash}
       - name: Upload assets
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set +e
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
 
