@@ -100,7 +100,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.dir }}-latest
+          name: ${{ matrix.target }}
           path: artifacts/${{ matrix.dir }}
 
   build-bridge-exit:
@@ -224,10 +224,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: |
+          set +e
           gh release -R ${{ github.repository }} delete daily -y --cleanup-tag
           gh release -R ${{ github.repository }} create daily --generate-notes
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${short_hash} ||
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${short_hash}
       - name: Upload assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
