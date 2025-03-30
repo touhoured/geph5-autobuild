@@ -240,11 +240,11 @@ jobs:
           set +e
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
-      - name: tamte
-        if: failure()
-        env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install tmate
-          tmate -F
+      # - name: tamte
+      #   if: failure()
+      #   env:
+      #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install tmate
+      #     tmate -F
