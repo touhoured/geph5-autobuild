@@ -231,7 +231,7 @@ jobs:
           set +e
           gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
           gh release -R ${{ github.repository }} create daily --generate-notes --prerelease
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes  --latest --target ${tag_name}
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes  --latest --target ${hash}
       - name: Upload assets
         continue-on-error: true
         env:
