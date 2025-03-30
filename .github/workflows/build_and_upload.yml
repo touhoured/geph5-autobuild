@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/${{ matrix.dir }}
-          mv target/${{ matrix.target }}/release/geph5-client* artifacts/${{ matrix.dir }}/
+          mv target/${{ matrix.target }}/release/geph5-client{,.exe} artifacts/${{ matrix.dir }}/
 
       - name: Install cargo-bundle
         if: matrix.os == 'macos-latest'
@@ -88,7 +88,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           cd binaries/geph5-client-gui
-          cargo bundle --release --target ${{ matrix.target }}
+          cargo bundle --release --target ${{ matri  x.target }}
 
       - name: Create macOS .app zip
         if: matrix.os == 'macos-latest'
@@ -229,9 +229,9 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          gh release -R ${{ github.repository }} delete daily -y --cleanup-tag
-          gh release -R ${{ github.repository }} create daily --generate-notes
-          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${tag_name}
+          gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
+          gh release -R ${{ github.repository }} create daily --generate-notes --prerelease
+          gh release -R ${{ github.repository }} create ${tag_name} --generate-notes  --latest --target ${tag_name}
       - name: Upload assets
         continue-on-error: true
         env:
@@ -240,7 +240,6 @@ jobs:
           set +e
           gh release -R ${{ github.repository }} upload ${tag_name} --clobber build/*
           gh release -R ${{ github.repository }} upload daily --clobber build/*
-
       - name: tamte
         if: failure()
         env:
