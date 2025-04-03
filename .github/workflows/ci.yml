@@ -55,6 +55,8 @@ jobs:
           repository: ${{ env.upstream }}
           fetch-depth: 0
           ref: ${{ inputs.reset_head }}
+      - name: Sync tag
+        run: git push --tags
       - name: Reset to input HEAD
         if: inputs.reset_head != null
         run: git reset --hard ${{ inputs.reset_head }}
@@ -69,17 +71,17 @@ jobs:
           echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
       - name: Delete daily
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
       - name: Create Release
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --latest --target ${hash}
       - name: Create daily
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
 
