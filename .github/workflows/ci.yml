@@ -29,12 +29,12 @@ env:
   upstream: geph-official/geph5
   bin: geph5-client
 
-permissions: write-all
-
 jobs:
   common:
     name: common
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       date: ${{ steps.getenv.outputs.date }}
       hash: ${{ steps.getenv.outputs.hash }}
@@ -69,17 +69,17 @@ jobs:
           echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
       - name: Delete daily
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
       - name: Create daily
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
       - name: Create Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --latest --target ${hash}
 
