@@ -56,7 +56,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.reset_head }}
       - name: Sync tag
-        run: git push --tags https://github.com/${{ github.repository }}
+        run: |
+          git remote set-url origin https://github.com/${{ github.repository }}
+          git push --tags
       - name: Reset to input HEAD
         if: inputs.reset_head != null
         run: git reset --hard ${{ inputs.reset_head }}
