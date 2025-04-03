@@ -29,11 +29,12 @@ env:
   upstream: geph-official/geph5
   bin: geph5-client
 
+permissions: write-all
+
 jobs:
   common:
     name: common
     runs-on: ubuntu-latest
-    permissions: write-all
     outputs:
       date: ${{ steps.getenv.outputs.date }}
       hash: ${{ steps.getenv.outputs.hash }}
