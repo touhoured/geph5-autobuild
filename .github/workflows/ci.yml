@@ -97,8 +97,8 @@ jobs:
     strategy:
       matrix:
         target:
-          # - i686-pc-windows-msvc
-          - x86_64-pc-windows-msvc
+          - i686-pc-windows-msvc
+          # - x86_64-pc-windows-msvc
     steps:
       - name: Checkout
         if: ${{ !inputs.reset_head }}
