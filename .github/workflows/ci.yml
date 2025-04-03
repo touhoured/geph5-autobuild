@@ -62,11 +62,11 @@ jobs:
         id: getenv
         shell: bash
         run: |
-          echo date=$(date -I) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
-          echo hash=$(git log --pretty=format:%H -n 1) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
-          echo short_hash=$(git log --pretty=format:%h -n 1) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
-          echo tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
-          echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo date=$(date -I) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo hash=$(git log --pretty=format:%H -n 1) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo short_hash=$(git log --pretty=format:%h -n 1) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
       - name: Delete daily
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,7 +81,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
-        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --prerelease --target ${hash}
+        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --latest --target ${hash}
 
 
   build-windows:
