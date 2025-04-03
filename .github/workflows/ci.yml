@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_build_windows:
+        description: "Skip Build Windows"
+        required: false
+        default: false
+        type: boolean
+      skip_build_linux:
+        description: "Skip Build Linux"
+        required: false
+        default: false
+        type: boolean
+      skip_release:
+        description: "Skip Release"
+        required: false
+        default: false
+        type: boolean
+      reset_head:
+        description: "Reset to Head"
+        required: false
+        type: string
+env:
+  upstream: geph-official/geph5
+  bin: geph5-client
+
+jobs:
+  common:
+    name: common
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      date: ${{ steps.getenv.outputs.date }}
+      hash: ${{ steps.getenv.outputs.hash }}
+      short: ${{ steps.getenv.outputs.short_hash }}
+      tag_name: ${{ steps.getenv.outputs.tag_name }}
+      version: ${{ steps.getenv.outputs.verison }}
+    steps:
+      - name: Checkout
+        if: ${{ !inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+          fetch-depth: 0
+      - name: Checkout
+        if: ${{ inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+          fetch-depth: 0
+          ref: ${{ inputs.reset_head }}
+      - name: Reset to input HEAD
+        if: inputs.reset_head != null
+        run: git reset --hard ${{ inputs.reset_head }}
+      - name: Get environment variable
+        id: getenv
+        shell: bash
+        run: |
+          echo date=$(date -I) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo hash=$(git log --pretty=format:%H -n 1) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo short_hash=$(git log --pretty=format:%h -n 1) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+      - name: Delete daily
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
+      - name: Create daily
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --prerelease --target ${hash}
+
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      hash: ${{ needs.common.outputs.hash }}
+      tag_name: ${{ needs.common.outputs.tag_name }}
+      version: ${{ needs.common.outputs.version }}
+    if: inputs.skip_build_windows != true
+    needs: common
+    strategy:
+      matrix:
+        target:
+          # - i686-pc-windows-msvc
+          - x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout
+        if: ${{ !inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+      - name: Checkout
+        if: ${{ inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+          ref: ${{ inputs.reset_head }}
+    #   - name: Use 64-bit WinDivert
+    #     if: matrix.target == 'x86_64-pc-windows-msvc'
+    #     shell: bash
+    #     run: |
+    #       curl -OL https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip
+    #       unzip WinDivert-2.2.2-A.zip
+    #       rm windows-lib/*
+    #       cp WinDivert-2.2.2-A/x64/* windows-lib/
+      - name: Build binary
+        run: cargo build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
+      - name: Rename
+        shell: bash
+        run: |
+          mkdir build
+          cp target/${{ matrix.target }}/release/${{ env.bin }}.exe build/
+          cd build
+          zip ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip ${{ env.bin }}.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
+          path: target/${{ matrix.target }}/release/${{ env.bin }}.exe
+      - name: Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/release/${{ env.bin }}.exe
+          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      hash: ${{ needs.common.outputs.hash }}
+      tag_name: ${{ needs.common.outputs.tag_name }}
+      version: ${{ needs.common.outputs.version }}
+    if: inputs.skip_build_linux != true
+    needs: common
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    steps:
+      - name: Checkout
+        if: ${{ !inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+      - name: Checkout
+        if: ${{ inputs.reset_head }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.upstream }}
+          ref: ${{ inputs.reset_head }}
+      - name: Install Cross
+        run: cargo install cross
+      - name: Build binary
+        run: cargo build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
+      - name: Rename
+        run: |
+          mkdir build
+          cp target/${{ matrix.target }}/release/${{ env.bin }} build
+          cd build
+          tar -cvaf ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.tar.gz ${{ env.bin }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
+          path: target/${{ matrix.target }}/release/${{ env.bin }}
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.tag_name }}.tar.gz
+          gh release -R ${{ github.repository }} upload daily --clobber build/${{ env.bin }}-${{ matrix.target }}
