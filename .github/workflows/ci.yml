@@ -172,7 +172,7 @@ jobs:
       - name: Install Cross
         run: cargo install cross
       - name: Build binary
-        run: cargo build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
+        run: cross build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
       - name: Rename
         run: |
           mkdir build
