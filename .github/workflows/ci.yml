@@ -97,7 +97,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
-        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --latest --target ${hash}
+        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${hash}
       - name: Create daily
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
