@@ -30,8 +30,28 @@ env:
   bin: geph5-client
 
 jobs:
+  sync:
+    name: Sync
+    runs-on: ubuntu-latest
+    permissions: 
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: master
+
+      - name: Sync
+        run: |
+          git remote add upstream https://github.com/${upstream}.git
+          git fetch upstream
+          # git reset --hard $(git log --pretty=format:'%H' -n 1)
+          git reset upstream/master
+          git push -f
+          git push --tags -f
+
   common:
     name: common
+    needs: sync
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -69,17 +89,17 @@ jobs:
           echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
       - name: Delete daily
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
       - name: Create Release
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --latest --target ${hash}
       - name: Create daily
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
 
