@@ -150,6 +150,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ env.bin }}.exe build/
           cd build
           7z a ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip ${{ env.bin }}.exe
+          cp ${{ env.bin }}.exe ${{ env.bin }}-${{ matrix.target }}.exe
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
@@ -159,7 +160,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/release/${{ env.bin }}.exe
+          gh release -R ${{ github.repository }} upload daily --clobber build/${{ env.bin }}-${{ matrix.target }}.exe
           gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip
 
   build-linux:
@@ -200,6 +201,7 @@ jobs:
           cp target/${{ matrix.target }}/release/${{ env.bin }} build
           cd build
           tar -cvaf ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.tar.gz ${{ env.bin }}
+          cp ${{ env.bin }} ${{ env.bin }}-${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
@@ -208,5 +210,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/release/${{ env.bin }}
+          gh release -R ${{ github.repository }} upload daily --clobber build/${{ env.bin }}-${{ matrix.target }}
           gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.tar.gz
