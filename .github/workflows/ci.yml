@@ -61,7 +61,7 @@ jobs:
       hash: ${{ steps.getenv.outputs.hash }}
       short: ${{ steps.getenv.outputs.short_hash }}
       tag_name: ${{ steps.getenv.outputs.tag_name }}
-      version: ${{ steps.getenv.outputs.verison }}
+      version: ${{ steps.getenv.outputs.version }}
     steps:
       - name: Checkout
         if: ${{ !inputs.reset_head }}
