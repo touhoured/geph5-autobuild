@@ -39,10 +39,11 @@ jobs:
       - uses: actions/checkout@v3
         with:
           ref: master
+          token: ${{ secrets.PAT }}
 
       - name: Sync
         run: |
-          git remote add upstream https://github.com/${upstream}.git
+          git remote add upstream https://github.com/${{ env.upstream }}.git
           git fetch upstream
           # git reset --hard $(git log --pretty=format:'%H' -n 1)
           git reset upstream/master
