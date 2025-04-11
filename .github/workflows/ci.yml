@@ -165,7 +165,7 @@ jobs:
         run: 7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
 
       - name: Package
-        if: matrix.os == 'windows-latest' && !inputs.reset_head
+        if: ${{ matrix.os == 'windows-latest' && !inputs.reset_head }}
         working-directory: target/${{ matrix.target }}/release/
         run: 7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
 
@@ -175,7 +175,7 @@ jobs:
         run: tar -xavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
 
       - name: Package release
-        if: matrix.os == 'ubuntu-latest' && !inputs.reset_head
+        if: ${{ matrix.os == 'ubuntu-latest' && !inputs.reset_head }}
         working-directory: target/${{ matrix.target }}/release/
         run: 7z -xavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
 
@@ -185,7 +185,7 @@ jobs:
           path: target/${{ matrix.target }}/*/geph5-client*
 
       - name: Release
-        if: !inputs.reset_head
+        if: ${{ !inputs.reset_head }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
