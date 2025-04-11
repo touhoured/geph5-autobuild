@@ -136,6 +136,7 @@ jobs:
         with:
           repository: geph-official/geph5
           ref: ${{ inputs.reset_head }}
+
       - name: Use 64-bit WinDivert
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: bash
@@ -145,6 +146,7 @@ jobs:
           rm windows-lib/*
           unzip WinDivert-2.2.2-A.zip
           cp WinDivert-2.2.2-A/x64/* windows-lib/
+
       - name: Install Cross
         run: cargo install cross
       - name: Build binary
@@ -163,7 +165,7 @@ jobs:
         run: 7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
 
       - name: Package
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && !inputs.reset_head
         working-directory: target/${{ matrix.target }}/release/
         run: 7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
 
@@ -173,7 +175,7 @@ jobs:
         run: tar -xavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
 
       - name: Package release
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !inputs.reset_head
         working-directory: target/${{ matrix.target }}/release/
         run: 7z -xavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
 
@@ -183,6 +185,7 @@ jobs:
           path: target/${{ matrix.target }}/*/geph5-client*
 
       - name: Release
+        if: !inputs.reset_head
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
