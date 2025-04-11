@@ -25,9 +25,6 @@ on:
         description: "Reset to Head"
         required: false
         type: string
-env:
-  upstream: geph-official/geph5
-  bin: geph5-client
 
 jobs:
   sync:
@@ -43,7 +40,7 @@ jobs:
 
       - name: Sync
         run: |
-          git remote add upstream https://github.com/${{ env.upstream }}.git
+          git remote add upstream https://github.com/geph-official/geph5.git
           git fetch upstream
           # git reset --hard $(git log --pretty=format:'%H' -n 1)
           git reset upstream/master
@@ -67,13 +64,13 @@ jobs:
         if: ${{ !inputs.reset_head }}
         uses: actions/checkout@v3
         with:
-          repository: ${{ env.upstream }}
+          repository: geph-official/geph5
           fetch-depth: 0
       - name: Checkout
         if: ${{ inputs.reset_head }}
         uses: actions/checkout@v3
         with:
-          repository: ${{ env.upstream }}
+          repository: geph-official/geph5
           fetch-depth: 0
           ref: ${{ inputs.reset_head }}
       - name: Reset to input HEAD
@@ -87,6 +84,7 @@ jobs:
           echo hash=$(git log --pretty=format:%H -n 1) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
           echo short_hash=$(git log --pretty=format:%h -n 1) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
           echo tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+          echo describe_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
           echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
       - name: Delete daily
         env:
@@ -105,110 +103,90 @@ jobs:
         run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
 
 
-  build-windows:
+  build:
     name: Build Windows
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     env:
       hash: ${{ needs.common.outputs.hash }}
+      short: ${{ needs.common.outputs.short }}
       tag_name: ${{ needs.common.outputs.tag_name }}
       version: ${{ needs.common.outputs.version }}
     if: inputs.skip_build_windows != true
     needs: common
     strategy:
       matrix:
-        target:
-          - i686-pc-windows-msvc
-          # - x86_64-pc-windows-msvc
+        include:
+          - target: i686-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
     steps:
       - name: Checkout
         if: ${{ !inputs.reset_head }}
         uses: actions/checkout@v3
         with:
-          repository: ${{ env.upstream }}
+          repository: geph-official/geph5
+          ref: ${{ env.tag_name }}
       - name: Checkout
         if: ${{ inputs.reset_head }}
         uses: actions/checkout@v3
         with:
-          repository: ${{ env.upstream }}
+          repository: geph-official/geph5
           ref: ${{ inputs.reset_head }}
-    #   - name: Use 64-bit WinDivert
-    #     if: matrix.target == 'x86_64-pc-windows-msvc'
-    #     shell: bash
-    #     run: |
-    #       curl -OL https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip
-    #       unzip WinDivert-2.2.2-A.zip
-    #       rm windows-lib/*
-    #       cp WinDivert-2.2.2-A/x64/* windows-lib/
-      - name: Build binary
-        run: cargo build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
-      - name: Rename
+      - name: Use 64-bit WinDivert
+        if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: bash
+        working-directory: binaries/geph5-client
         run: |
-          mkdir build
-          cp target/${{ matrix.target }}/release/${{ env.bin }}.exe build/
-          cd build
-          7z a ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip ${{ env.bin }}.exe
-          cp ${{ env.bin }}.exe ${{ env.bin }}-${{ matrix.target }}.exe
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
-          path: target/${{ matrix.target }}/release/${{ env.bin }}.exe
-      - name: Release
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release -R ${{ github.repository }} upload daily --clobber build/${{ env.bin }}-${{ matrix.target }}.exe
-          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.zip
-
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      hash: ${{ needs.common.outputs.hash }}
-      tag_name: ${{ needs.common.outputs.tag_name }}
-      version: ${{ needs.common.outputs.version }}
-    if: inputs.skip_build_linux != true
-    needs: common
-    strategy:
-      matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - aarch64-unknown-linux-musl
-    steps:
-      - name: Checkout
-        if: ${{ !inputs.reset_head }}
-        uses: actions/checkout@v3
-        with:
-          repository: ${{ env.upstream }}
-      - name: Checkout
-        if: ${{ inputs.reset_head }}
-        uses: actions/checkout@v3
-        with:
-          repository: ${{ env.upstream }}
-          ref: ${{ inputs.reset_head }}
+          curl -OL https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip
+          rm windows-lib/*
+          unzip WinDivert-2.2.2-A.zip
+          cp WinDivert-2.2.2-A/x64/* windows-lib/
       - name: Install Cross
         run: cargo install cross
       - name: Build binary
-        run: cross build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
-      - name: Rename
+        shell: bash
+        run: cross build --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
+      - name: Build release binary
+        if: ${{ !inputs.reset_head }}
+        shell: bash
         run: |
-          mkdir build
-          cp target/${{ matrix.target }}/release/${{ env.bin }} build
-          cd build
-          tar -cvaf ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.tar.gz ${{ env.bin }}
-          cp ${{ env.bin }} ${{ env.bin }}-${{ matrix.target }}
+          git reset --hard ${{ env.tag_name }}
+          cross build --locked --release --target ${{ matrix.target }} --manifest-path binaries/geph5-client/Cargo.toml --all-features
+
+      - name: Package
+        if: matrix.os == 'windows-latest'
+        working-directory: target/${{ matrix.target }}/debug/
+        run: 7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
+
+      - name: Package
+        if: matrix.os == 'windows-latest'
+        working-directory: target/${{ matrix.target }}/release/
+        run: 7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+
+      - name: Package debug
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: target/${{ matrix.target }}/debug/
+        run: tar -xavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
+
+      - name: Package release
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: target/${{ matrix.target }}/release/
+        run: 7z -xavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.bin }}-${{ matrix.target }}-${{ env.version }}
-          path: target/${{ matrix.target }}/release/${{ env.bin }}
+          name: geph5-client-${{ matrix.target }}
+          path: target/${{ matrix.target }}/*/geph5-client*
+
       - name: Release
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release -R ${{ github.repository }} upload daily --clobber build/${{ env.bin }}-${{ matrix.target }}
-          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber build/${{ env.bin }}-${{ matrix.target }}-${{ env.version }}.tar.gz
+          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/debug/geph5-client-${{ matrix.target }}-*
+          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
