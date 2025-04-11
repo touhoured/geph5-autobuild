@@ -173,12 +173,12 @@ jobs:
       - name: Package debug
         if: matrix.os == 'ubuntu-latest'
         working-directory: target/${{ matrix.target }}/debug/
-        run: tar -xavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
+        run: tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
 
       - name: Package release
         if: ${{ matrix.os == 'ubuntu-latest' && !inputs.reset_head }}
         working-directory: target/${{ matrix.target }}/release/
-        run: 7z -xavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+        run: tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
 
       - uses: actions/upload-artifact@v4
         with:
