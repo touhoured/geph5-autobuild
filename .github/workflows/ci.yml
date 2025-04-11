@@ -181,9 +181,16 @@ jobs:
         run: tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
 
       - uses: actions/upload-artifact@v4
+        if: matrix.os == 'windows-latest'
         with:
           name: geph5-client-${{ matrix.target }}
-          path: target/${{ matrix.target }}/*/geph5-client*
+          path: target/${{ matrix.target }}/*/geph5-client.exe
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: geph5-client-${{ matrix.target }}
+          path: target/${{ matrix.target }}/*/geph5-client
 
       - name: Release
         if: ${{ !inputs.reset_head }}
