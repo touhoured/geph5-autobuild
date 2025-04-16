@@ -163,22 +163,30 @@ jobs:
       - name: Package
         if: matrix.os == 'windows-latest'
         working-directory: target/${{ matrix.target }}/debug/
-        run: 7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
+        run: |
+          7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
+          sha256sum geph5-client-${{ matrix.target }}-${{ env.short }}.zip > geph5-client-${{ matrix.target }}-${{ env.short }}.zip.sha256
 
       - name: Package
         if: ${{ matrix.os == 'windows-latest' && !inputs.reset_head }}
         working-directory: target/${{ matrix.target }}/release/
-        run: 7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+        run: |
+          7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+          sha256sum geph5-client-${{ matrix.target }}-${{ env.short }}.zip > geph5-client-${{ matrix.target }}-${{ env.short }}.zip.sha256
 
       - name: Package debug
         if: matrix.os == 'ubuntu-latest'
         working-directory: target/${{ matrix.target }}/debug/
-        run: tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
+        run: |
+          tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
+          sha256sum geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz > geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz.sha256
 
       - name: Package release
         if: ${{ matrix.os == 'ubuntu-latest' && !inputs.reset_head }}
         working-directory: target/${{ matrix.target }}/release/
-        run: tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+        run: |
+          tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+          sha256sum geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz > geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'windows-latest'
