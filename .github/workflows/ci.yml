@@ -104,7 +104,7 @@ jobs:
 
 
   build:
-    name: Build Windows
+    name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -188,7 +188,7 @@ jobs:
         working-directory: target/${{ matrix.target }}/release/
         run: |
           tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
-          sha256sum geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz > geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz.sha256
+          sha256sum geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz > geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         if: matrix.os == 'windows-latest'
