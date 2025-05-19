@@ -211,4 +211,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/debug/geph5-client-${{ matrix.target }}-*
-          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
+          gh release -R ${{ github.repository }} upload ${{ env.tag_name }} target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
