@@ -204,11 +204,19 @@ jobs:
           name: geph5-client-${{ matrix.target }}
           path: target/${{ matrix.target }}/*/geph5-client
 
-      - name: Release
+      - name: Release Debug
         if: ${{ !inputs.reset_head }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/debug/geph5-client-${{ matrix.target }}-*
+
+      - name: Release Release
+        if: ${{ !inputs.reset_head }}
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: |
           gh release -R ${{ github.repository }} upload ${{ env.tag_name }} target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
