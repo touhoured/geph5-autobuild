@@ -163,9 +163,9 @@ jobs:
         working-directory: target/${{ matrix.target }}/release/
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+            7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
           else
-            tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+            tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
           fi
 
       - uses: actions/upload-artifact@v4
