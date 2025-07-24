@@ -157,48 +157,22 @@ jobs:
         shell: bash
         run: |
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
-      - name: Build release binary
-        if: ${{ !inputs.reset_head }}
-        shell: bash
-        run: |
-          git reset --hard ${{ env.tag_name }}
-          cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
 
-      - name: Package windows debug
-        if: matrix.os == 'windows-latest'
-        working-directory: target/${{ matrix.target }}/debug/
-        run: |
-          7z a geph5-client-${{ matrix.target }}-${{ env.short }}.zip geph5-client.exe
-
-      - name: Package windows release
-        if: ${{ matrix.os == 'windows-latest' && !inputs.reset_head }}
+      - name: Package
         working-directory: target/${{ matrix.target }}/release/
         run: |
-          7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
-
-      - name: Package linux debug
-        if: matrix.os == 'ubuntu-latest'
-        working-directory: target/${{ matrix.target }}/debug/
-        run: |
-          tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
-
-      - name: Package linux release
-        if: ${{ matrix.os == 'ubuntu-latest' && !inputs.reset_head }}
-        working-directory: target/${{ matrix.target }}/release/
-        run: |
-          tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+          else
+            tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+          fi
 
       - uses: actions/upload-artifact@v4
-        if: matrix.os == 'windows-latest'
         with:
           name: geph5-client-${{ matrix.target }}
-          path: target/${{ matrix.target }}/*/geph5-client.exe
-
-      - uses: actions/upload-artifact@v4
-        if: matrix.os == 'ubuntu-latest'
-        with:
-          name: geph5-client-${{ matrix.target }}
-          path: target/${{ matrix.target }}/*/geph5-client
+          path: |
+            target/${{ matrix.target }}/release/geph5-client.exe
+            target/${{ matrix.target }}/release/geph5-client
 
       - name: Release Debug
         if: ${{ !inputs.reset_head }}
@@ -206,8 +180,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/debug/geph5-client-${{ matrix.target }}-*
+          gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
 
+      - name: Build release binary
+        if: ${{ !inputs.reset_head }}
+        shell: bash
+        run: |
+          git reset --hard ${{ env.tag_name }}
+          cross clean
+          cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
+      - name: Package
+        if: ${{ !inputs.reset_head }}
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a geph5-client-${{ matrix.target }}-${{ env.version }}.zip geph5-client.exe
+          else
+            tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
+          fi
       - name: Release Release
         if: ${{ !inputs.reset_head }}
         shell: bash
