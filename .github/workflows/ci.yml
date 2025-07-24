@@ -174,7 +174,7 @@ jobs:
             target/${{ matrix.target }}/release/geph5-client.exe
             target/${{ matrix.target }}/release/geph5-client
 
-      - name: Release Debug
+      - name: Upload daily
         if: ${{ !inputs.reset_head }}
         shell: bash
         env:
@@ -187,7 +187,6 @@ jobs:
         shell: bash
         run: |
           git reset --hard ${{ env.tag_name }}
-          cross clean
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
       - name: Package
         if: ${{ !inputs.reset_head }}
@@ -198,7 +197,7 @@ jobs:
           else
             tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
           fi
-      - name: Release Release
+      - name: Upload ${{ env.tag_name }}
         if: ${{ !inputs.reset_head }}
         shell: bash
         env:
