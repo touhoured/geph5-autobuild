@@ -159,6 +159,7 @@ jobs:
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
 
       - name: Package
+        shell: bash
         working-directory: target/${{ matrix.target }}/release/
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -190,6 +191,7 @@ jobs:
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
       - name: Package
         if: ${{ !inputs.reset_head }}
+        shell: bash
         working-directory: target/${{ matrix.target }}/release/
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
