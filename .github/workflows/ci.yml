@@ -5,26 +5,6 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
-    inputs:
-      skip_build_windows:
-        description: "Skip Build Windows"
-        required: false
-        default: false
-        type: boolean
-      skip_build_linux:
-        description: "Skip Build Linux"
-        required: false
-        default: false
-        type: boolean
-      skip_release:
-        description: "Skip Release"
-        required: false
-        default: false
-        type: boolean
-      reset_head:
-        description: "Reset to Head"
-        required: false
-        type: string
 
 jobs:
   sync:
@@ -33,7 +13,8 @@ jobs:
     permissions: 
       contents: write
     steps:
-      - uses: actions/checkout@v3
+
+      - uses: actions/checkout@v4
         with:
           ref: master
           token: ${{ secrets.PAT }}
@@ -47,35 +28,20 @@ jobs:
           git push -f
           git push --tags -f
 
+
+
   common:
-    name: common
-    needs: sync
+    name: Common
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      date: ${{ steps.getenv.outputs.date }}
-      hash: ${{ steps.getenv.outputs.hash }}
-      short: ${{ steps.getenv.outputs.short_hash }}
-      tag_name: ${{ steps.getenv.outputs.tag_name }}
-      version: ${{ steps.getenv.outputs.version }}
     steps:
       - name: Checkout
-        if: ${{ !inputs.reset_head }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: geph-official/geph5
           fetch-depth: 0
-      - name: Checkout
-        if: ${{ inputs.reset_head }}
-        uses: actions/checkout@v3
-        with:
-          repository: geph-official/geph5
-          fetch-depth: 0
-          ref: ${{ inputs.reset_head }}
-      - name: Reset to input HEAD
-        if: inputs.reset_head != null
-        run: git reset --hard ${{ inputs.reset_head }}
+
       - name: Get environment variable
         id: getenv
         shell: bash
@@ -86,35 +52,32 @@ jobs:
           echo tag_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
           echo describe_name=$(git describe --tags --abbrev=0 --match geph5-client\*) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
           echo version=$(git describe --tags --abbrev=0 --match geph5-client\* | cut -d - -f 3) | tee -a "${GITHUB_OUTPUT}" "${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        
       - name: Delete daily
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} delete daily --yes --cleanup-tag
-      - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${hash}
       - name: Create daily
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         run: gh release -R ${{ github.repository }} create daily --generate-notes --prerelease --target ${hash}
-
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: gh release -R ${{ github.repository }} create ${tag_name} --generate-notes --target ${hash}
 
   build:
     name: Build ${{ matrix.target }}
+    needs: common
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
-    env:
-      hash: ${{ needs.common.outputs.hash }}
-      short: ${{ needs.common.outputs.short }}
-      tag_name: ${{ needs.common.outputs.tag_name }}
-      version: ${{ needs.common.outputs.version }}
-    if: inputs.skip_build_windows != true
-    needs: common
     strategy:
       matrix:
         include:
@@ -128,19 +91,10 @@ jobs:
             os: ubuntu-latest
     steps:
       - name: Checkout
-        if: ${{ !inputs.reset_head }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: geph-official/geph5
           fetch-depth: 0
-          fetch-tags: true
-      - name: Checkout
-        if: ${{ inputs.reset_head }}
-        uses: actions/checkout@v3
-        with:
-          repository: geph-official/geph5
-          fetch-depth: 0
-          ref: ${{ inputs.reset_head }}
 
       - name: Use 64-bit WinDivert
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -155,10 +109,21 @@ jobs:
       - name: Install Cross
         run: |
           cargo install cross --locked
+
+
+
+          
       - name: Build binary
         shell: bash
         run: |
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geph5-client-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/geph5-client.exe
+            target/${{ matrix.target }}/release/geph5-client
 
       - name: Package
         shell: bash
@@ -170,29 +135,23 @@ jobs:
             tar -cavf geph5-client-${{ matrix.target }}-${{ env.short }}.tar.gz geph5-client
           fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: geph5-client-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/geph5-client.exe
-            target/${{ matrix.target }}/release/geph5-client
-
       - name: Upload daily
-        if: ${{ !inputs.reset_head }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release -R ${{ github.repository }} upload daily --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-*
 
+
+
+
       - name: Build release binary
-        if: ${{ !inputs.reset_head }}
         shell: bash
         run: |
           git reset --hard ${{ env.tag_name }}
           cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
+          
       - name: Package
-        if: ${{ !inputs.reset_head }}
         shell: bash
         working-directory: target/${{ matrix.target }}/release/
         run: |
@@ -201,8 +160,8 @@ jobs:
           else
             tar -cavf geph5-client-${{ matrix.target }}-${{ env.version }}.tar.gz geph5-client
           fi
+
       - name: Upload ${{ env.tag_name }}
-        if: ${{ !inputs.reset_head }}
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
