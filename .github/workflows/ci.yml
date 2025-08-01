@@ -35,6 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      date: ${{ steps.getenv.outputs.date }}
+      hash: ${{ steps.getenv.outputs.hash }}
+      short: ${{ steps.getenv.outputs.short_hash }}
+      tag_name: ${{ steps.getenv.outputs.tag_name }}
+      version: ${{ steps.getenv.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,6 +84,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+    env:
+      hash: ${{ needs.common.outputs.hash }}
+      short: ${{ needs.common.outputs.short }}
+      tag_name: ${{ needs.common.outputs.tag_name }}
+      version: ${{ needs.common.outputs.version }}
     strategy:
       matrix:
         include:
