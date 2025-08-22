@@ -127,7 +127,7 @@ jobs:
       - name: Build binary
         shell: bash
         run: |
-          cross build --locked --release --target "${{ matrix.target }}" --manifest-path binaries/geph5-client/Cargo.toml
+          cross build --locked --release --target "${{ matrix.target }}" --features aws_lambda --manifest-path binaries/geph5-client/Cargo.toml
 
       - uses: actions/upload-artifact@v4
         with:
@@ -179,3 +179,4 @@ jobs:
         continue-on-error: true
         run: |
           gh release -R ${{ github.repository }} upload ${{ env.tag_name }} target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-${{ env.version }}.*
+
