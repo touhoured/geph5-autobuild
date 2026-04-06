@@ -17,16 +17,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: master
-          token: ${{ secrets.PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Sync
         run: |
           git remote add upstream https://github.com/geph-official/geph5.git
-          git fetch upstream
-          # git reset --hard $(git log --pretty=format:'%H' -n 1)
-          git reset upstream/master
-          git push -f
-          git push --tags -f
+          git fetch upstream --tags --force
+          
+          # Ensure we are synced with upstream master
+          git checkout master
+          git reset --hard upstream/master
+          
+          # Push the branch
+          git push origin master --force
+          
+          # Sync tags: This deletes local tags that don't exist on upstream
+          # and fetches the current ones.
+          git fetch --prune --prune-tags upstream
+          
+          # Force push tags to your fork
+          git push origin --tags --force
 
 
 
