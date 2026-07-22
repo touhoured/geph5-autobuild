@@ -117,15 +117,15 @@ jobs:
           repository: geph-official/geph5
           fetch-depth: 0
 
-      - name: Use 64-bit WinDivert
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        shell: bash
-        working-directory: binaries/geph5-client
-        run: |
-          curl -OL https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip
-          rm windows-lib/*
-          unzip WinDivert-2.2.2-A.zip
-          cp WinDivert-2.2.2-A/x64/* windows-lib/
+      # - name: Use 64-bit WinDivert
+      #   if: matrix.target == 'x86_64-pc-windows-msvc'
+      #   shell: bash
+      #   working-directory: binaries/geph5-client
+      #   run: |
+      #     curl -OL https://github.com/basil00/Divert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip
+      #     rm windows-lib/*
+      #     unzip WinDivert-2.2.2-A.zip
+      #     cp WinDivert-2.2.2-A/x64/* windows-lib/
 
       - name: Install Cross
         run: |
