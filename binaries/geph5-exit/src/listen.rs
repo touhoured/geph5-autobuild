@@ -64,13 +64,19 @@ async fn c2e_loop() -> anyhow::Result<()> {
                     "rejected connection from {remote_addr}/AS{asn} in blacklisted country {country}"
                 )
             }
-            anyhow::Ok(())
+            anyhow::Ok((asn, country))
         };
-        if let Err(err) = test_addr.await {
-            tracing::warn!(err = debug(err), "rejected a direct connection");
-            continue;
-        }
-        geph5_rt::spawn(handle_client(c2e_raw)).detach()
+        let (asn, country) = match test_addr.await {
+            Ok(v) => v,
+            Err(err) => {
+                tracing::warn!(err = debug(err), "rejected a direct connection");
+                continue;
+            }
+        };
+        geph5_rt::spawn(handle_client(crate::direct_count::DirectCountPipe::new(
+            c2e_raw, asn, country,
+        )))
+        .detach()
     }
 }
 

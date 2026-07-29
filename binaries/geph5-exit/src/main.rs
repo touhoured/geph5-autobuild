@@ -32,6 +32,7 @@ mod proxy;
 mod ratelimit;
 mod schedlag;
 mod google_selfcheck;
+mod direct_count;
 
 #[cfg(target_env = "musl")]
 #[global_allocator]

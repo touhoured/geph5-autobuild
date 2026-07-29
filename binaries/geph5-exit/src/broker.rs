@@ -289,6 +289,7 @@ pub async fn broker_loop() -> anyhow::Result<()> {
                         &server_name,
                         level,
                     ));
+                    stats.extend(crate::direct_count::direct_bytes_stat_events());
                     client
                         .report_stats(Mac::new(
                             stats,
