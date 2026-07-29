@@ -242,6 +242,14 @@ pub(crate) fn cleanup_stale() {
     backend::cleanup_stale();
 }
 
+/// Register for removal of a live Windows adapter before Task Scheduler
+/// hard-replaces the manager that created it.
+#[cfg(target_os = "windows")]
+pub(crate) fn prepare_adapter_removal(
+) -> anyhow::Result<Option<backend::AdapterRemovalNotification>> {
+    backend::AdapterRemovalNotification::prepare()
+}
+
 pub(crate) fn check_network(probe: NetworkProbe) -> CheckedNetwork {
     CheckedNetwork {
         generation: probe.generation,

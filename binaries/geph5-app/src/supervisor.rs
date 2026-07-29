@@ -1,14 +1,11 @@
 //! Child `geph5-client` process lifecycle: build its config, spawn it, kill it,
 //! restart it, and hand out a control-protocol client pointed at it.
 //!
-//! Adapted from gephgui-wry's `src/manager.rs` (spawn `--config <file>`, poll the
-//! control port until reachable), but here the supervisor manages the child as a
-//! sibling `geph5-client` binary rather than re-executing itself.
+//! The supervisor manages each child as a sibling `geph5-client` binary rather
+//! than re-executing itself. A successful process creation is the lifecycle
+//! commit point; ordinary control calls may briefly fail while the child binds.
 
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use anyhow::Context as _;
 use geph5_broker_protocol::{Credential, ExitConstraint};
@@ -86,6 +83,11 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Whether Geph currently owns the desktop's system PAC setting.
+    pub(crate) fn system_proxy_active(&self) -> bool {
+        self.connected && !self.vpn && self.proxy.as_ref().is_some_and(|proxy| proxy.autoconf)
+    }
+
     pub fn apply_tunnel_settings(&mut self, settings: TunnelSettings) {
         self.exit_constraint = settings.exit_constraint;
         self.proxy = settings.proxy;
@@ -215,6 +217,26 @@ mod tests {
         assert!(settings.vpn);
         assert!(settings.allow_lan);
         assert!(settings.proxy.is_none());
+    }
+
+    #[test]
+    fn system_proxy_is_active_only_for_connected_proxy_mode() {
+        let mut settings = Settings {
+            connected: true,
+            vpn: false,
+            proxy: Some(ProxySettings::default()),
+            ..Settings::default()
+        };
+        assert!(settings.system_proxy_active());
+
+        settings.connected = false;
+        assert!(!settings.system_proxy_active());
+        settings.connected = true;
+        settings.vpn = true;
+        assert!(!settings.system_proxy_active());
+        settings.vpn = false;
+        settings.proxy.as_mut().unwrap().autoconf = false;
+        assert!(!settings.system_proxy_active());
     }
 
     #[test]
@@ -367,27 +389,4 @@ pub fn live_control() -> ControlClient {
 /// A control-protocol client pointed at the permanent **query** engine.
 pub fn query_control() -> ControlClient {
     platform::engine_control(EngineRole::Query)
-}
-
-/// Wait until the given engine's local control protocol answers. The endpoint is
-/// bound independently of the engine's network work, so elapsed time is not a
-/// meaningful failure signal; only a child exit is.
-pub async fn wait_control_ready(
-    child: &mut std::process::Child,
-    client: &ControlClient,
-) -> anyhow::Result<()> {
-    loop {
-        // start_time() is a cheap, always-available control method.
-        match client.start_time().await {
-            Ok(_) => return Ok(()),
-            Err(_) => {
-                if let Ok(Some(status)) = child.try_wait() {
-                    anyhow::bail!(
-                        "engine exited during startup ({status}); see the manager log for the engine's own error"
-                    );
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    }
 }

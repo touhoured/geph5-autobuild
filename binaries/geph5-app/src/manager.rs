@@ -94,8 +94,10 @@ impl ManagerImpl {
     }
 
     /// Start local child/VPN reconciliation after the manager listener exists.
-    /// The state lock serializes ordinary RPCs behind this short initialization,
-    /// while `ping` deliberately remains lock-free.
+    /// The state lock serializes ordinary RPCs behind this local initialization,
+    /// while `ping` deliberately remains lock-free. Child creation is the
+    /// lifecycle commit point; callers may briefly observe a transport error
+    /// while a freshly spawned child binds its control endpoint.
     pub(crate) fn initialize_in_background(&self) {
         let this = self.clone();
         geph5_rt::spawn(async move {
@@ -141,28 +143,25 @@ impl ManagerImpl {
         // unprivileged service user cannot be established, don't start it.
         let service_user =
             platform::ensure_service_user().map_err(|e| format!("engine service user: {e:#}"))?;
-        let mut child = supervisor::spawn_query(service_user).map_err(|e| format!("{e:?}"))?;
-        if let Err(error) =
-            supervisor::wait_control_ready(&mut child, &supervisor::query_control()).await
-        {
-            geph5_rt::spawn_blocking(move || platform::kill_child(child)).await;
-            return Err(format!("{error:?}"));
-        }
+        // Do not probe the control endpoint here. During rapid manager
+        // replacement a probe can connect to the previous pipe instance and
+        // wait forever after that process exits. A successful spawn commits the
+        // lifecycle; the health reconciler handles an immediate child exit.
+        let child = supervisor::spawn_query(service_user).map_err(|e| format!("{e:?}"))?;
         inner.query = Some(child);
         Ok(())
     }
 
     /// Reassert the complete desired tunnel state. Existing VPN protection is
     /// retained whenever VPN remains desired; mode transitions tear it down only
-    /// after the replacement proxy child and PAC configuration are ready.
+    /// after the replacement proxy child is spawned and PAC configuration is
+    /// applied.
     async fn reconcile_tunnel(inner: &mut Inner) -> Result<(), String> {
         // No DNS happens here: the engine resolves broker fronts itself, on
         // demand, over the physical NIC's own resolvers (GEPH_PHYS_DNS) — see
         // geph5-client's `fronted_http` / `china::resolve_a_physical`.
         let tunnel_config = if inner.settings.connected {
-            Some(
-                supervisor::build_tunnel_config(&inner.settings).map_err(|e| format!("{e:#}"))?,
-            )
+            Some(supervisor::build_tunnel_config(&inner.settings).map_err(|e| format!("{e:#}"))?)
         } else {
             None
         };
@@ -209,21 +208,18 @@ impl ManagerImpl {
             platform::kill_child(spawned.child);
             return Err(format!("attaching VPN packet transport: {error:#}"));
         }
-        let mut child = spawned.child;
-        if let Err(error) =
-            supervisor::wait_control_ready(&mut child, &supervisor::live_control()).await
-        {
-            inner.vpn.stop_transport();
-            platform::kill_child(child);
-            return Err(format!("{error:?}"));
-        }
+        // As with the query engine, process creation is the lifecycle commit
+        // point. Control calls may briefly fail while the new child binds; the
+        // child-health reconciler handles a process that exits after spawning.
+        let child = spawned.child;
         if let Err(error) = reconcile_system_proxy(inner).await {
             inner.vpn.stop_transport();
             platform::kill_child(child);
             return Err(error);
         }
-        // In proxy-only mode this is the commit point: the replacement child and
-        // PAC are ready, so lifting the old VPN protection is now intentional.
+        // In proxy-only mode this is the commit point: the replacement child is
+        // spawned and PAC configuration is applied, so lifting the old VPN
+        // protection is now intentional.
         if !want_vpn {
             inner.vpn.cleanup();
         }
@@ -272,12 +268,6 @@ impl ManagerImpl {
     }
 }
 
-/// Whether the settings ask for the system proxy to be auto-configured: only
-/// meaningful when the local proxy is on at all.
-fn wants_auto_proxy(settings: &Settings) -> bool {
-    settings.proxy.as_ref().is_some_and(|p| p.autoconf)
-}
-
 /// Configure (or clear) the given session's system proxy off the reactor thread.
 async fn apply_proxy(session: Option<SessionContext>, connected: bool) -> Result<(), String> {
     let url = format!("http://{}/proxy.pac", supervisor::PAC_ADDR);
@@ -291,8 +281,7 @@ async fn apply_proxy(session: Option<SessionContext>, connected: bool) -> Result
 }
 
 async fn reconcile_system_proxy(inner: &mut Inner) -> Result<(), String> {
-    let want_proxy =
-        inner.settings.connected && !inner.settings.vpn && wants_auto_proxy(&inner.settings);
+    let want_proxy = inner.settings.system_proxy_active();
     let session = if want_proxy {
         inner.desktop_session.clone()
     } else {

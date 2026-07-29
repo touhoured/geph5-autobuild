@@ -55,6 +55,7 @@ pub(crate) fn set_system_proxy(
         }
         let default_session = SessionContext::default();
         windows::apply_for_session(session.unwrap_or(&default_session), connected, pac_url)
+            .map(|_| ())
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -82,6 +83,22 @@ pub(crate) fn apply_proxy_in_process(connected: bool, pac_url: &str) -> anyhow::
     {
         let _ = (connected, pac_url);
         compile_error!("geph5-app supports only Linux, macOS, and Windows");
+    }
+}
+
+/// Clear Geph's PAC setting during Windows unregistration.
+///
+/// A LocalSystem caller can launch the existing helper in the active console
+/// session. A UAC-elevated desktop caller generally cannot query that token, but
+/// already has the correct HKCU itself, so it performs the same registry edit
+/// directly.
+#[cfg(target_os = "windows")]
+fn clear_system_proxy_for_unregistration() -> anyhow::Result<()> {
+    let session = SessionContext::default();
+    if windows::apply_for_session(&session, false, "")? {
+        Ok(())
+    } else {
+        windows::apply(false, "")
     }
 }
 
@@ -400,7 +417,7 @@ mod windows {
         _session: &SessionContext,
         connected: bool,
         url: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let session_id = unsafe { WTSGetActiveConsoleSessionId() };
         // 0xFFFFFFFF: no session is currently attached to the physical console.
         if session_id == u32::MAX {
@@ -415,7 +432,7 @@ mod windows {
                      unchanged — browsers may use a stale PAC until the next login/connect"
                 );
             }
-            return Ok(());
+            return Ok(false);
         }
 
         // Token for the user logged into the console session. Needs
@@ -433,12 +450,12 @@ mod windows {
                      unchanged — browsers may use a stale PAC until the next login/connect"
                 );
             }
-            return Ok(());
+            return Ok(false);
         }
 
         let result = spawn_apply_proxy(token, connected, url);
         unsafe { CloseHandle(token) };
-        result
+        result.map(|_| true)
     }
 
     /// `CreateProcessAsUserW(token, …)` to run `geph __apply-proxy on|off [url]`
@@ -1243,6 +1260,112 @@ pub(crate) fn kill_child(mut child: Child) {
     tracing::info!(pid, "killed child geph5-client");
 }
 
+#[cfg(target_os = "windows")]
+struct ProcessWaitHandle(::windows::Win32::Foundation::HANDLE);
+
+#[cfg(target_os = "windows")]
+impl Drop for ProcessWaitHandle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = ::windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// Open waitable handles for every running instance of a scheduled task.
+///
+/// Taking the handles before requesting task termination avoids all localized
+/// `schtasks` output parsing and gives replacement a real process-lifetime
+/// barrier. `None` means the task is not registered yet.
+#[cfg(target_os = "windows")]
+fn running_task_processes(name: &str) -> anyhow::Result<Option<Vec<ProcessWaitHandle>>> {
+    use ::windows::{
+        Win32::{
+            Foundation::ERROR_FILE_NOT_FOUND,
+            System::{
+                Com::{
+                    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+                    CoUninitialize,
+                },
+                TaskScheduler::{ITaskService, TaskScheduler},
+                Threading::{OpenProcess, PROCESS_SYNCHRONIZE},
+                Variant::{VARIANT, VT_I4},
+            },
+        },
+        core::BSTR,
+    };
+
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED)
+            .context("initializing COM for Task Scheduler")?;
+        let _com = scopeguard::guard((), |_| CoUninitialize());
+
+        let service: ITaskService = CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER)
+            .context("opening Task Scheduler")?;
+        service
+            .Connect(
+                VARIANT::default(),
+                VARIANT::default(),
+                VARIANT::default(),
+                VARIANT::default(),
+            )
+            .context("connecting to Task Scheduler")?;
+        let root = service
+            .GetFolder(&BSTR::from("\\"))
+            .context("opening Task Scheduler root")?;
+        let task = match root.GetTask(&BSTR::from(name)) {
+            Ok(task) => task,
+            Err(error) if error.code() == ERROR_FILE_NOT_FOUND.to_hresult() => return Ok(None),
+            Err(error) => return Err(error).context("opening Geph Manager task"),
+        };
+        let instances = task
+            .GetInstances(0)
+            .context("enumerating running Geph Manager instances")?;
+        let count = instances
+            .Count()
+            .context("counting running Geph Manager instances")?;
+        let mut handles = Vec::with_capacity(count.max(0) as usize);
+        for index in 1..=count {
+            let mut item_index = VARIANT::default();
+            let item_index_inner = &mut *item_index.Anonymous.Anonymous;
+            item_index_inner.vt = VT_I4;
+            item_index_inner.Anonymous.lVal = index;
+            let instance = instances
+                .get_Item(item_index)
+                .context("reading a running Geph Manager instance")?;
+            let pid = instance
+                .EnginePID()
+                .context("reading the Geph Manager process ID")?;
+            handles.push(ProcessWaitHandle(
+                OpenProcess(PROCESS_SYNCHRONIZE, false, pid)
+                    .with_context(|| format!("opening Geph Manager process {pid}"))?,
+            ));
+        }
+        Ok(Some(handles))
+    }
+}
+
+/// Wait for captured task processes to finish. There is deliberately no
+/// deadline: starting a replacement while the old manager still owns its
+/// WinTUN/WFP state cannot produce a correct system state.
+#[cfg(target_os = "windows")]
+fn wait_for_processes(processes: &[ProcessWaitHandle]) -> anyhow::Result<()> {
+    use ::windows::Win32::{
+        Foundation::WAIT_OBJECT_0,
+        System::Threading::{INFINITE, WaitForSingleObject},
+    };
+
+    for process in processes {
+        if unsafe { WaitForSingleObject(process.0, INFINITE) } != WAIT_OBJECT_0 {
+            anyhow::bail!(
+                "waiting for the previous Geph Manager process failed: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn register_manager() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
@@ -1293,13 +1416,26 @@ pub(crate) fn register_manager() -> anyhow::Result<()> {
         let xml_path = std::env::temp_dir().join("geph-manager-task.xml");
         write_utf16le(&xml_path, &task_xml(&exe))?;
 
-        // Replacing a task definition does not replace its currently-running
-        // instance. Stop that instance explicitly before installing the new
-        // definition; its engine children are in a kill-on-job-close job.
-        // Task termination cannot run graceful teardown, so remove any WFP,
-        // route, or DNS state it may have left behind before starting again.
-        let _ = run_status("schtasks", &["/End", "/TN", NAME]);
-        crate::vpn::cleanup_stale();
+        // Register before stopping the task so an asynchronous WinTUN device
+        // removal cannot race past us. WinTUN removes an adapter when the process
+        // that created it exits; starting a new creator while that PnP removal is
+        // incomplete can collide with the old software-device instance.
+        let adapter_removal = crate::vpn::prepare_adapter_removal()?;
+
+        // Capture the exact task processes before stopping them. `/End` requests
+        // hard termination but returns before the process has necessarily
+        // exited. Wait on the native process handles without a deadline before
+        // touching the task definition or starting a replacement.
+        let old_processes = running_task_processes(NAME)?;
+        if let Some(old_processes) = &old_processes
+            && !old_processes.is_empty()
+        {
+            run_status("schtasks", &["/End", "/TN", NAME])?;
+            wait_for_processes(old_processes)?;
+            if let Some(adapter_removal) = &adapter_removal {
+                adapter_removal.wait()?;
+            }
+        }
 
         let create = run_status(
             "schtasks",
@@ -1313,8 +1449,17 @@ pub(crate) fn register_manager() -> anyhow::Result<()> {
             ],
         );
         let _ = std::fs::remove_file(&xml_path);
-        create?;
-        run_status("schtasks", &["/Run", "/TN", NAME])?;
+        if let Err(error) = create {
+            // No replacement will run its startup cleanup, so leave the machine
+            // usable if task registration itself fails after the old manager was
+            // terminated.
+            crate::vpn::cleanup_stale();
+            return Err(error);
+        }
+        if let Err(error) = run_status("schtasks", &["/Run", "/TN", NAME]) {
+            crate::vpn::cleanup_stale();
+            return Err(error);
+        }
         println!("Registered and started the \"{NAME}\" scheduled task.");
         Ok(())
     }
@@ -1351,6 +1496,16 @@ pub(crate) fn unregister_manager() -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         const NAME: &str = "Geph Manager";
+        let clear_system_proxy = match crate::supervisor::Settings::load() {
+            Ok(settings) => settings.system_proxy_active(),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "could not inspect manager settings before unregistration"
+                );
+                false
+            }
+        };
         // `schtasks /End` is a TerminateProcess: no CTRL_C reaches the manager, so
         // its graceful `shutdown_teardown` never runs and the non-dynamic WFP kill
         // switch (plus routes/DNS) is left stranded. `/Delete` then removes the task
@@ -1363,6 +1518,10 @@ pub(crate) fn unregister_manager() -> anyhow::Result<()> {
         let _ = run_status("schtasks", &["/End", "/TN", NAME]);
         let _ = run_status("schtasks", &["/Delete", "/TN", NAME, "/F"]);
         crate::vpn::cleanup_stale();
+        if clear_system_proxy {
+            clear_system_proxy_for_unregistration()
+                .context("clearing Geph system proxy during unregistration")?;
+        }
         println!("Unregistered the \"{NAME}\" scheduled task.");
         Ok(())
     }

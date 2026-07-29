@@ -32,7 +32,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     process::{ChildStdin, ChildStdout},
     sync::{
-        Arc,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
@@ -40,20 +40,27 @@ use std::{
 
 use anyhow::{Context, bail};
 use windows_sys::Win32::{
+    Devices::DeviceAndDriverInstallation::{
+        CM_LOCATE_DEVNODE_PHANTOM, CM_Locate_DevNodeW, CM_NOTIFY_ACTION_DEVICEINSTANCEREMOVED,
+        CM_NOTIFY_FILTER, CM_NOTIFY_FILTER_0, CM_NOTIFY_FILTER_0_1,
+        CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE, CM_Register_Notification, CM_Uninstall_DevNode,
+        CM_Unregister_Notification, CR_NO_SUCH_DEVNODE, CR_SUCCESS, HCMNOTIFICATION,
+    },
     Foundation::{
         ERROR_BUFFER_OVERFLOW, ERROR_NOT_FOUND, ERROR_OBJECT_ALREADY_EXISTS, ERROR_SUCCESS,
         NO_ERROR,
     },
     NetworkManagement::IpHelper::{
-        CreateIpForwardEntry2, CreateUnicastIpAddressEntry, DNS_INTERFACE_SETTINGS,
-        DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_IPV6, DNS_SETTING_NAMESERVER,
-        DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST,
-        GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIpForwardTable2, IP_ADAPTER_ADDRESSES_LH,
-        InitializeIpForwardEntry, InitializeUnicastIpAddressEntry, MIB_IPFORWARD_ROW2,
-        MIB_IPFORWARD_TABLE2, MIB_UNICASTIPADDRESS_ROW, SetInterfaceDnsSettings,
+        ConvertInterfaceGuidToLuid, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
+        DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_IPV6,
+        DNS_SETTING_NAMESERVER, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
+        GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIpForwardTable2,
+        IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, InitializeUnicastIpAddressEntry,
+        MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_UNICASTIPADDRESS_ROW,
+        SetInterfaceDnsSettings,
     },
     Networking::WinSock::{
-        ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0,
+        ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0,
         SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_INET,
     },
 };
@@ -65,6 +72,7 @@ use firewall::{Firewall, WfpKillSwitch};
 const TUN_NAME: &str = "Geph";
 /// Fixed adapter GUID so we recognise our own device across runs.
 const TUN_GUID: u128 = 0x6765_7068_0000_0000_0000_0000_0000_0001;
+const TUN_DEVICE_INSTANCE_ID: &str = r"SWD\WINTUN\{67657068-0000-0000-0000-000000000001}";
 
 const TUN_V4_ADDR: Ipv4Addr = Ipv4Addr::new(100, 64, 0, 1);
 const TUN_V4_PREFIX: u8 = 10; // 255.192.0.0
@@ -122,6 +130,142 @@ pub(super) struct VpnHandle {
     adapter: Arc<Adapter>,
     phys: PhysIface,
     firewall: WfpKillSwitch,
+}
+
+struct AdapterRemovalContext {
+    removed: Mutex<bool>,
+    changed: Condvar,
+}
+
+/// A native PnP notification registered before hard task termination. Waiting
+/// for the actual device-instance removal avoids both an arbitrary delay and the
+/// WinTUN create-vs-removal race.
+pub(crate) struct AdapterRemovalNotification {
+    notification: HCMNOTIFICATION,
+    context: Box<AdapterRemovalContext>,
+}
+
+impl AdapterRemovalNotification {
+    pub(crate) fn prepare() -> anyhow::Result<Option<Self>> {
+        unsafe extern "system" fn callback(
+            _notification: HCMNOTIFICATION,
+            context: *const c_void,
+            action: i32,
+            _event_data: *const windows_sys::Win32::Devices::DeviceAndDriverInstallation::CM_NOTIFY_EVENT_DATA,
+            _event_data_size: u32,
+        ) -> u32 {
+            if action == CM_NOTIFY_ACTION_DEVICEINSTANCEREMOVED {
+                let context = unsafe { &*(context.cast::<AdapterRemovalContext>()) };
+                let mut removed = context.removed.lock().unwrap();
+                *removed = true;
+                context.changed.notify_all();
+            }
+            ERROR_SUCCESS
+        }
+
+        let instance_id: Vec<u16> = TUN_DEVICE_INSTANCE_ID
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut device = 0;
+        match unsafe { CM_Locate_DevNodeW(&mut device, instance_id.as_ptr(), 0) } {
+            CR_SUCCESS => {}
+            CR_NO_SUCH_DEVNODE => return Ok(None),
+            error => anyhow::bail!("locating the WinTUN device instance failed ({error})"),
+        }
+
+        let mut filter: CM_NOTIFY_FILTER = unsafe { std::mem::zeroed() };
+        filter.cbSize = std::mem::size_of::<CM_NOTIFY_FILTER>() as u32;
+        filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE;
+        let mut filter_instance_id = [0u16; 200];
+        filter_instance_id[..instance_id.len()].copy_from_slice(&instance_id);
+        filter.u = CM_NOTIFY_FILTER_0 {
+            DeviceInstance: CM_NOTIFY_FILTER_0_1 {
+                InstanceId: filter_instance_id,
+            },
+        };
+
+        let context = Box::new(AdapterRemovalContext {
+            removed: Mutex::new(false),
+            changed: Condvar::new(),
+        });
+        let mut notification = std::ptr::null_mut();
+        let result = unsafe {
+            CM_Register_Notification(
+                &filter,
+                std::ptr::from_ref(context.as_ref()).cast(),
+                Some(callback),
+                &mut notification,
+            )
+        };
+        if result != CR_SUCCESS {
+            if unsafe { CM_Locate_DevNodeW(&mut device, instance_id.as_ptr(), 0) }
+                == CR_NO_SUCH_DEVNODE
+            {
+                return Ok(None);
+            }
+            anyhow::bail!("registering WinTUN removal notification failed ({result})");
+        }
+        let registration = Self {
+            notification,
+            context,
+        };
+
+        // Check again after registering so a device removed concurrently with
+        // registration cannot leave this process waiting for a missed event.
+        match unsafe { CM_Locate_DevNodeW(&mut device, instance_id.as_ptr(), 0) } {
+            CR_SUCCESS => Ok(Some(registration)),
+            CR_NO_SUCH_DEVNODE => Ok(None),
+            error => anyhow::bail!("locating the WinTUN device instance failed ({error})"),
+        }
+    }
+
+    pub(crate) fn wait(&self) -> anyhow::Result<()> {
+        let mut removed = self.context.removed.lock().unwrap();
+        while !*removed {
+            removed = self.context.changed.wait(removed).unwrap();
+        }
+        drop(removed);
+
+        uninstall_orphaned_adapter()
+    }
+}
+
+fn uninstall_orphaned_adapter() -> anyhow::Result<()> {
+    // A process killed while owning an HSWDEVICE cannot run
+    // WintunCloseAdapter's device-uninstall path. PnP first reports the
+    // device as removed but retains a phantom devnode whose requested
+    // network GUID still collides with immediate recreation. Remove that
+    // nonpresent instance's persistent state before reusing the GUID.
+    let instance_id: Vec<u16> = TUN_DEVICE_INSTANCE_ID
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut device = 0;
+    match unsafe {
+        CM_Locate_DevNodeW(
+            &mut device,
+            instance_id.as_ptr(),
+            CM_LOCATE_DEVNODE_PHANTOM,
+        )
+    } {
+        CR_SUCCESS => {}
+        CR_NO_SUCH_DEVNODE => return Ok(()),
+        error => anyhow::bail!("locating the removed WinTUN device instance failed ({error})"),
+    }
+    let result = unsafe { CM_Uninstall_DevNode(device, 0) };
+    if result != CR_SUCCESS {
+        anyhow::bail!("uninstalling the orphaned WinTUN device failed ({result})");
+    }
+    Ok(())
+}
+
+impl Drop for AdapterRemovalNotification {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CM_Unregister_Notification(self.notification);
+        }
+    }
 }
 
 impl VpnHandle {
@@ -195,18 +339,27 @@ pub(super) fn physical_iface() -> anyhow::Result<PhysIface> {
     Ok(PhysIface { index4, index6 })
 }
 
-/// Bring up the WinTUN device, routing, DNS, and the kill switch. Idempotent:
-/// stale state from a prior run is cleaned first.
+/// Bring up the WinTUN device, routing, DNS, and the kill switch. Manager
+/// initialization owns prior-run cleanup; this function rolls back only the
+/// state created by its own failed setup attempt.
 pub(super) fn setup(phys: PhysIface, allow_lan: bool) -> anyhow::Result<VpnHandle> {
+    tracing::debug!("starting Windows VPN setup");
     let wintun = unsafe { wintun::load() }.map_err(|e| anyhow::anyhow!("load wintun.dll: {e}"))?;
-    cleanup_stale_with_wintun(&wintun);
-    let rollback = scopeguard::guard(&wintun, |wintun| cleanup_stale_with_wintun(wintun));
+    tracing::debug!("loaded wintun.dll for VPN setup");
+    let rollback = scopeguard::guard((), |_| cleanup_stale());
 
     let adapter = match Adapter::open(&wintun, TUN_NAME) {
-        Ok(existing) => existing,
-        Err(_) => Adapter::create(&wintun, TUN_NAME, TUN_NAME, Some(TUN_GUID))
-            .map_err(|e| anyhow::anyhow!("create wintun adapter: {e}"))?,
+        Ok(existing) => {
+            tracing::debug!("opened existing WinTUN adapter");
+            existing
+        }
+        Err(_) => {
+            tracing::debug!("creating WinTUN adapter");
+            Adapter::create(&wintun, TUN_NAME, TUN_NAME, Some(TUN_GUID))
+                .map_err(|e| anyhow::anyhow!("create wintun adapter: {e}"))?
+        }
     };
+    tracing::debug!("WinTUN adapter is ready");
     let luid = unsafe { adapter.get_luid().Value };
 
     // Addresses + MTU + DNS sentinel.
@@ -215,17 +368,21 @@ pub(super) fn setup(phys: PhysIface, allow_lan: bool) -> anyhow::Result<VpnHandl
     let _ = set_unicast_address(luid, IpAddr::V6(TUN_V6_ADDR), TUN_V6_PREFIX);
     let _ = adapter.set_mtu(TUN_MTU);
     let _ = set_tun_dns(adapter.get_guid(), &sentinel_dns());
+    tracing::debug!("configured WinTUN addressing and DNS");
 
     // Kill switch before capture routes. (The engine's own broker/bridge/exit sockets reach the
     // physical NIC per-process via IP_UNICAST_IF + the loopback forwarder, so
     // there are no destination bypass routes to punch in here.)
     let mut firewall = WfpKillSwitch::new();
     firewall.preflight().context("kill switch preflight")?;
+    tracing::debug!("completed WFP kill-switch preflight");
     firewall
         .install(&geph_app_ids(), luid, allow_lan)
         .context("install kill switch")?;
+    tracing::debug!("installed WFP kill switch");
 
     ensure_split_routes(luid)?;
+    tracing::debug!("installed WinTUN capture routes");
 
     scopeguard::ScopeGuard::into_inner(rollback);
     Ok(VpnHandle {
@@ -288,21 +445,37 @@ fn delete_split_routes(luid: u64) {
 /// fail-closed), so a manager that restarts *disconnected* must delete it here or
 /// the host stays blackholed. Best-effort; safe to call when nothing is stranded.
 pub(super) fn cleanup_stale() {
-    match unsafe { wintun::load() } {
-        Ok(wintun) => cleanup_stale_with_wintun(&wintun),
-        // Even if wintun can't load, still remove the (crash-persisted) kill
-        // switch so the host isn't left blackholed.
-        Err(_) => {
-            let _ = firewall::purge_stale();
+    // A Task Scheduler restart after hard process termination does not pass
+    // through register_manager's pre-registered removal barrier. Join the
+    // already-started PnP removal here, then remove the nonpresent devnode so
+    // the fixed requested GUID can be reused immediately.
+    match AdapterRemovalNotification::prepare() {
+        Ok(Some(removal)) => {
+            if let Err(error) = removal.wait() {
+                tracing::warn!(%error, "could not finish stale WinTUN device removal");
+            }
+        }
+        Ok(None) => {
+            if let Err(error) = uninstall_orphaned_adapter() {
+                tracing::warn!(%error, "could not remove orphaned WinTUN device");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not observe stale WinTUN device removal");
         }
     }
-}
 
-/// Best-effort removal of leftover state from a previous run.
-fn cleanup_stale_with_wintun(wintun: &Wintun) {
-    if let Ok(adapter) = Adapter::open(wintun, TUN_NAME) {
-        let _ = set_tun_dns(adapter.get_guid(), &[]);
-        delete_split_routes(unsafe { adapter.get_luid().Value });
+    // Do not open the adapter through WinTUN merely to clean it. Immediately
+    // opening the same adapter again for setup can wedge inside
+    // WintunOpenAdapter after a hard manager replacement. The adapter GUID is
+    // fixed, so IP Helper can resolve its LUID directly without acquiring a
+    // WinTUN adapter handle.
+    let guid = windows_sys::core::GUID::from_u128(TUN_GUID);
+    let mut luid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH =
+        unsafe { std::mem::zeroed() };
+    let _ = set_tun_dns(TUN_GUID, &[]);
+    if unsafe { ConvertInterfaceGuidToLuid(&guid, &mut luid) } == NO_ERROR {
+        delete_split_routes(unsafe { luid.Value });
     }
     // Delete any leftover kill-switch sublayer (and its filters) by GUID, in case
     // a previous manager used a non-dynamic session or otherwise didn't clean up.
