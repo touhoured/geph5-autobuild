@@ -103,6 +103,12 @@ it — there is no list of metric names anywhere. Telegraf creates
 discovers it, creates its time index and `_minutely`/`_hourly` tiers, and
 retention and `metric()` apply from then on.
 
+**Adding a new tag to an existing metric** is equally zero-config: Telegraf
+adds the raw-table column, and since rollup tiers store tags as a single
+`tags jsonb` column (not one column per tag), new rows simply carry the
+extra key from the next rollup tick — no DDL, no locks, no migration.
+Rows from before the tag honestly lack the key (`tags->>'newtag'` is NULL).
+
 ## Storage: Postgres resolution tiers
 
 Schema machinery: `binaries/geph5-broker/sql/metrics.sql` — idempotent,
@@ -120,6 +126,14 @@ and structure, not configuration:
 | raw | ~10s (Telegraf flush) | 14 days | `metrics.bridge_bytes` |
 | minutely | 1 min | 90 days | `metrics.bridge_bytes_minutely` |
 | hourly | 1 h | forever | `metrics.bridge_bytes_hourly` |
+
+Raw tables are Telegraf-shaped (one text column per tag). Rollup tiers have
+a **fixed schema for life**: `("time", tags jsonb, metric_type, <numeric
+columns>)` with the primary key on `("time", tags, metric_type)` — the jsonb
+is built per-row at rollup time from whatever tag columns the raw table has,
+with empty/NULL tag values stripped so "tag absent" and "tag empty" are one
+canonical shape. Numeric columns that appear later are added to tiers on the
+fly (metadata-only ALTER; they are not part of the key).
 
 Maintained by pg_cron:
 

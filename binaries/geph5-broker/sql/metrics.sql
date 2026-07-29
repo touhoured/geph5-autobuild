@@ -7,6 +7,13 @@
 --   * Every pg_cron rollup tick discovers raw tables by introspection,
 --     auto-creates missing `<name>_minutely` / `<name>_hourly` tiers (and a
 --     time index on the raw table), and upserts the trailing window.
+--   * Rollup tiers store tags as ONE `tags jsonb` column, built per-row from
+--     whatever tag columns the raw table has at rollup time. A binary that
+--     starts sending a new statsd tag therefore needs no DDL anywhere: new
+--     rows simply carry the extra key, old rows honestly lack it. (Telegraf
+--     adds the raw-table column by itself; nothing else has a schema to
+--     change.) Numeric columns that appear later are added to the tiers
+--     automatically — a metadata-only ALTER, since they are not in the key.
 --   * Aggregation semantics come from the data itself: the statsd
 --     `metric_type` column (counter -> sum, gauge -> avg) plus structural
 --     per-column rules for timer tables (count -> sum, mean -> count-weighted
@@ -19,6 +26,8 @@
 -- tick, with zero configuration here or anywhere else.
 --
 -- Apply with: psql "$POSTGRES_URL" -f metrics.sql   (idempotent)
+-- Do NOT wrap in a single transaction (-1): the columnar->jsonb tier
+-- migration at the bottom commits per table to keep locks and WAL bounded.
 
 CREATE SCHEMA IF NOT EXISTS metrics;
 
@@ -98,6 +107,28 @@ RETURNS text[] LANGUAGE sql STABLE AS $$
       AND data_type IN ('double precision', 'real', 'bigint', 'integer', 'smallint', 'numeric')
 $$;
 
+-- SQL expression building the tags jsonb for one row of `tbl` from its tag
+-- columns (text columns minus the statsd bookkeeping column). Empty/NULL tag
+-- values are stripped, so "tag not sent" and "tag empty" are one canonical
+-- shape and series line up across the raw/rollup boundary.
+CREATE OR REPLACE FUNCTION metrics.tags_expr(tbl text)
+RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT coalesce(
+        'jsonb_strip_nulls(jsonb_build_object(' ||
+            string_agg(format('%L, nullif(%I, %L)', c, c, ''), ', ' ORDER BY c) ||
+        '))',
+        $j$'{}'::jsonb$j$)
+    FROM unnest(metrics.text_cols(tbl)) c WHERE c <> 'metric_type'
+$$;
+
+-- SQL expression for one row's metric_type, tolerating tables that predate
+-- the column.
+CREATE OR REPLACE FUNCTION metrics.mtype_expr(tbl text)
+RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT CASE WHEN 'metric_type' = ANY (metrics.text_cols(tbl))
+                THEN 'coalesce(metric_type, '''')' ELSE $e$''$e$ END
+$$;
+
 -- The statsd type of a metric ('counter' | 'gauge' | 'timing'), read from the
 -- data; NULL when unknown (e.g. rows written before metric_type was stored).
 CREATE OR REPLACE FUNCTION metrics.type_of(tbl text)
@@ -131,40 +162,50 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
 $$;
 
 ------------------------------------------------------------------------------
--- Tier management: create missing rollup tables (and the raw time index)
--- from the raw table's own shape. Tag columns are NOT NULL DEFAULT '' so they
--- can participate in the primary key that ON CONFLICT upserts against.
+-- Tier management: create missing rollup tables (and the raw time index).
+-- Tier schema is FIXED for the life of the table: ("time", tags jsonb,
+-- metric_type, <numeric columns>). Tags never require DDL again; numeric
+-- columns that appear later on the raw table are added on the fly
+-- (metadata-only, they are not part of the key).
 ------------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION metrics.ensure_tiers(raw text)
+-- (an earlier revision returned boolean, which CREATE OR REPLACE cannot undo)
+DROP FUNCTION IF EXISTS metrics.ensure_tiers(text);
+CREATE FUNCTION metrics.ensure_tiers(raw text)
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
     suffix text;
+    tier text;
     col text;
     cols_sql text;
 BEGIN
     EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON metrics.%I ("time")',
                    raw || '_time_idx', raw);
     FOREACH suffix IN ARRAY ARRAY['_minutely', '_hourly'] LOOP
-        CONTINUE WHEN to_regclass('metrics.' || quote_ident(raw || suffix)) IS NOT NULL;
-        cols_sql := '"time" timestamptz NOT NULL';
-        FOREACH col IN ARRAY metrics.text_cols(raw) LOOP
-            cols_sql := cols_sql || format(', %I text NOT NULL DEFAULT %L', col, '');
-        END LOOP;
+        tier := raw || suffix;
+        IF to_regclass('metrics.' || quote_ident(tier)) IS NULL THEN
+            cols_sql := '"time" timestamptz NOT NULL'
+                || ', tags jsonb NOT NULL DEFAULT ''{}''::jsonb'
+                || ', metric_type text NOT NULL DEFAULT ''''';
+            FOREACH col IN ARRAY metrics.num_cols(raw) LOOP
+                cols_sql := cols_sql || format(', %I double precision', col);
+            END LOOP;
+            cols_sql := cols_sql || ', PRIMARY KEY ("time", tags, metric_type)';
+            EXECUTE format('CREATE TABLE metrics.%I (%s)', tier, cols_sql);
+            CONTINUE;
+        END IF;
         FOREACH col IN ARRAY metrics.num_cols(raw) LOOP
-            cols_sql := cols_sql || format(', %I double precision', col);
+            CONTINUE WHEN col = ANY (metrics.num_cols(tier));
+            EXECUTE format('ALTER TABLE metrics.%I ADD COLUMN %I double precision',
+                           tier, col);
         END LOOP;
-        cols_sql := cols_sql || format(', PRIMARY KEY (%s)',
-            (SELECT string_agg(quote_ident(c), ', ')
-             FROM unnest('{time}'::text[] || metrics.text_cols(raw)) AS c));
-        EXECUTE format('CREATE TABLE metrics.%I (%s)', raw || suffix, cols_sql);
     END LOOP;
 END $$;
 
 ------------------------------------------------------------------------------
--- Rollup: upsert the trailing window into one tier. Only columns present in
--- BOTH the raw table and the tier participate, so hand-crafted or historical
--- tier tables with fewer columns keep working.
+-- Rollup: upsert the trailing window into one tier. The group key is derived
+-- deterministically from each raw row's data, so re-rolling any window is
+-- idempotent — including across tag-set changes.
 ------------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION metrics.rollup_tier(raw text, trunc_unit text, suffix text, cutoff timestamptz)
@@ -173,46 +214,35 @@ DECLARE
     tier text := raw || suffix;
     mtype text := metrics.type_of(raw);
     raw_nums text[] := metrics.num_cols(raw);
-    tags text[];
     nums text[];
     col text;
-    sel_tags text := '';
-    ins_cols text := '"time"';
+    ins_cols text := '"time", tags, metric_type';
     sel_aggs text := '';
     upd_sets text := '';
-    conflict_cols text;
 BEGIN
-    -- intersect with the tier's columns
-    SELECT coalesce(array_agg(c ORDER BY c), '{}') INTO tags
-    FROM unnest(metrics.text_cols(raw)) c WHERE c = ANY (metrics.text_cols(tier));
+    -- numeric columns present in both raw and tier (ensure_tiers keeps the
+    -- tier in sync; the intersection also tolerates hand-crafted tiers)
     SELECT coalesce(array_agg(c ORDER BY c), '{}') INTO nums
     FROM unnest(raw_nums) c WHERE c = ANY (metrics.num_cols(tier));
     IF array_length(nums, 1) IS NULL THEN
         RETURN;
     END IF;
 
-    FOREACH col IN ARRAY tags LOOP
-        ins_cols := ins_cols || format(', %I', col);
-        sel_tags := sel_tags || format(', coalesce(%I, %L)', col, '');
-    END LOOP;
     FOREACH col IN ARRAY nums LOOP
         ins_cols := ins_cols || format(', %I', col);
         sel_aggs := sel_aggs || format(', %s', metrics.agg_expr(col, mtype, raw_nums));
         upd_sets := upd_sets || format('%s%I = EXCLUDED.%I',
                                        CASE WHEN upd_sets = '' THEN '' ELSE ', ' END, col, col);
     END LOOP;
-    SELECT string_agg(quote_ident(c), ', ')
-    INTO conflict_cols FROM unnest('{time}'::text[] || tags) AS c;
 
     EXECUTE format(
         $q$ INSERT INTO metrics.%I (%s)
-            SELECT date_trunc(%L, "time")%s%s
+            SELECT date_trunc(%L, "time"), %s, %s%s
             FROM metrics.%I WHERE "time" >= %L
-            GROUP BY %s
-            ON CONFLICT (%s) DO UPDATE SET %s $q$,
-        tier, ins_cols, trunc_unit, sel_tags, sel_aggs, raw, cutoff,
-        (SELECT string_agg((i)::text, ', ') FROM generate_series(1, 1 + coalesce(array_length(tags, 1), 0)) i),
-        conflict_cols, upd_sets);
+            GROUP BY 1, 2, 3
+            ON CONFLICT ("time", tags, metric_type) DO UPDATE SET %s $q$,
+        tier, ins_cols, trunc_unit, metrics.tags_expr(raw), metrics.mtype_expr(raw),
+        sel_aggs, raw, cutoff, upd_sets);
 END $$;
 
 CREATE OR REPLACE FUNCTION metrics.rollup(since timestamptz DEFAULT now() - interval '3 hours')
@@ -270,26 +300,11 @@ DECLARE
     min_hi timestamptz;
     b1 timestamptz;  -- hourly/minutely boundary
     b2 timestamptz;  -- minutely/raw boundary
-    tag_cols text[];
-    tags_expr text;
-    inner_cols text;
     src_sql text;
 BEGIN
     IF p_agg NOT IN ('avg', 'sum', 'max', 'min') THEN
         RAISE EXCEPTION 'metric(): unsupported aggregation %', p_agg;
     END IF;
-
-    -- Tags = text columns present in both raw and rollup tiers, minus the
-    -- statsd bookkeeping column.
-    SELECT coalesce(array_agg(c ORDER BY c), '{}') INTO tag_cols
-    FROM unnest(metrics.text_cols(p_name)) c
-    WHERE c = ANY (metrics.text_cols(p_name || '_hourly')) AND c <> 'metric_type';
-
-    SELECT coalesce('jsonb_build_object(' ||
-               string_agg(format('%L, %I', c, c), ', ') || ')', $j$'{}'::jsonb$j$)
-    INTO tags_expr FROM unnest(tag_cols) c;
-    SELECT '"time", ' || coalesce(string_agg(quote_ident(c), ', ') || ', ', '') || quote_ident(p_field)
-    INTO inner_cols FROM unnest(tag_cols) c;
 
     -- Whisper-style resolution mixing: hourly [p_from, b1) + minutely
     -- [b1, b2) + raw [b2, p_to), boundaries placed by bucket size and tier
@@ -311,23 +326,30 @@ BEGIN
         b1 := least(coalesce(min_lo, b2), b2);
     END IF;
 
+    -- Tiers carry their tags jsonb as stored; raw rows build theirs from the
+    -- raw table's current tag columns with the same canonical expression the
+    -- rollup uses, so series are continuous across the tier boundary.
     src_sql := format(
-        'SELECT %1$s FROM metrics.%2$I WHERE "time" >= %5$L AND "time" < %6$L
+        'SELECT "time", tags, %2$I AS __v FROM metrics.%3$I
+             WHERE "time" >= %6$L AND "time" < %7$L
          UNION ALL
-         SELECT %1$s FROM metrics.%3$I WHERE "time" >= %7$L AND "time" < %8$L
+         SELECT "time", tags, %2$I FROM metrics.%4$I
+             WHERE "time" >= %8$L AND "time" < %9$L
          UNION ALL
-         SELECT %1$s FROM metrics.%4$I WHERE "time" >= %9$L AND "time" < %10$L',
-        inner_cols, p_name || '_hourly', p_name || '_minutely', p_name,
+         SELECT "time", %1$s AS tags, %2$I FROM metrics.%5$I
+             WHERE "time" >= %10$L AND "time" < %11$L',
+        metrics.tags_expr(p_name), p_field,
+        p_name || '_hourly', p_name || '_minutely', p_name,
         p_from, least(b1, p_to),
         greatest(p_from, b1), least(b2, p_to),
         greatest(p_from, b2), p_to);
 
     RETURN QUERY EXECUTE format(
-        $q$ SELECT date_bin(%L, "time", timestamptz 'epoch') AS "time", %s AS tags,
-                   %s(%I)::double precision AS value
+        $q$ SELECT date_bin(%L, "time", timestamptz 'epoch') AS "time", tags,
+                   %s(__v)::double precision AS value
             FROM (%s) __src
             GROUP BY 1, 2 ORDER BY 1 $q$,
-        p_bucket, tags_expr, p_agg, p_field, src_sql);
+        p_bucket, p_agg, src_sql);
 END $$;
 
 ------------------------------------------------------------------------------
@@ -362,6 +384,95 @@ LANGUAGE sql STABLE AS $$
     WHERE m."time" >= p_from
       AND m."time" + p_bucket <= least(p_to, now())
 $$;
+
+------------------------------------------------------------------------------
+-- One-time migration: rebuild any tier still in the legacy columnar-tag
+-- format (one text column per tag, tags in the primary key) into the jsonb
+-- format. Detected by the absence of a `tags` jsonb column, so this is
+-- idempotent and knows no table names. Each table commits separately to keep
+-- locks, WAL, and peak disk bounded (hence: do not apply this file with -1).
+------------------------------------------------------------------------------
+
+DO $mig$
+DECLARE
+    t record;
+    tier text;
+    mtype text;
+    nums text[];
+    col text;
+    cols_sql text;
+    ins_cols text;
+    sel_aggs text;
+    lo timestamptz;
+    hi timestamptz;
+    slice timestamptz;
+BEGIN
+    FOR t IN
+        SELECT table_name::text AS name FROM information_schema.tables it
+        WHERE it.table_schema = 'metrics' AND it.table_type = 'BASE TABLE'
+          AND (it.table_name LIKE '%\_minutely' ESCAPE '\'
+               OR it.table_name LIKE '%\_hourly' ESCAPE '\')
+          AND NOT EXISTS (SELECT 1 FROM information_schema.columns c
+                          WHERE c.table_schema = 'metrics'
+                            AND c.table_name = it.table_name
+                            AND c.column_name = 'tags' AND c.data_type = 'jsonb')
+        -- smallest first: dashboards heal quickly while the giant tables
+        -- migrate last
+        ORDER BY pg_total_relation_size(('metrics.' || quote_ident(it.table_name))::regclass)
+    LOOP
+        tier := t.name;
+        -- Re-check freshness: the FOR list is a snapshot, and a concurrent
+        -- apply may have migrated this tier since. Re-migrating a converted
+        -- tier would squash its tags to {}.
+        CONTINUE WHEN EXISTS (SELECT 1 FROM information_schema.columns c
+                              WHERE c.table_schema = 'metrics' AND c.table_name = tier
+                                AND c.column_name = 'tags' AND c.data_type = 'jsonb');
+        mtype := metrics.type_of(tier);
+        nums := metrics.num_cols(tier);
+
+        cols_sql := '"time" timestamptz NOT NULL'
+            || ', tags jsonb NOT NULL DEFAULT ''{}''::jsonb'
+            || ', metric_type text NOT NULL DEFAULT ''''';
+        ins_cols := '"time", tags, metric_type';
+        sel_aggs := '';
+        FOREACH col IN ARRAY nums LOOP
+            cols_sql := cols_sql || format(', %I double precision', col);
+            ins_cols := ins_cols || format(', %I', col);
+            -- GROUP BY absorbs the (theoretical) key collisions from
+            -- canonicalizing ''/NULL tags away
+            sel_aggs := sel_aggs || format(', %s', metrics.agg_expr(col, mtype, nums));
+        END LOOP;
+
+        -- a leftover from an interrupted run holds stale partial data
+        EXECUTE format('DROP TABLE IF EXISTS metrics.%I', tier || '__mig');
+        EXECUTE format('CREATE TABLE metrics.%I (%s, PRIMARY KEY ("time", tags, metric_type))',
+                       tier || '__mig', cols_sql);
+        -- Copy in week slices, committing each: bounds WAL accumulation so a
+        -- big table cannot push a managed instance over its disk threshold
+        -- (Aiven flips read-only and kills the writer). Slicing on the raw
+        -- "time" value never splits a group.
+        EXECUTE format('SELECT min("time"), max("time") FROM metrics.%I', tier) INTO lo, hi;
+        slice := lo;
+        WHILE slice IS NOT NULL AND slice <= hi LOOP
+            EXECUTE format(
+                $q$ INSERT INTO metrics.%I (%s)
+                    SELECT "time", %s, %s%s FROM metrics.%I
+                    WHERE "time" >= %L AND "time" < %L
+                    GROUP BY 1, 2, 3 $q$,
+                tier || '__mig', ins_cols,
+                metrics.tags_expr(tier), metrics.mtype_expr(tier), sel_aggs, tier,
+                slice, slice + interval '7 days');
+            COMMIT;
+            slice := slice + interval '7 days';
+        END LOOP;
+        EXECUTE format('DROP TABLE metrics.%I', tier);
+        EXECUTE format('ALTER TABLE metrics.%I RENAME TO %I', tier || '__mig', tier);
+        EXECUTE format('ALTER INDEX metrics.%I RENAME TO %I',
+                       tier || '__mig_pkey', tier || '_pkey');
+        RAISE NOTICE 'migrated % to jsonb tags', tier;
+        COMMIT;
+    END LOOP;
+END $mig$;
 
 ------------------------------------------------------------------------------
 -- pg_cron schedules (cron.schedule upserts by job name).
