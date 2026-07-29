@@ -375,8 +375,8 @@ mod windows {
         WTSGetActiveConsoleSessionId, WTSQueryUserToken,
     };
     use windows_sys::Win32::System::Threading::{
-        CREATE_NO_WINDOW, CreateProcessAsUserW, GetExitCodeProcess, PROCESS_INFORMATION,
-        STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+        CREATE_NO_WINDOW, CreateProcessAsUserW, GetExitCodeProcess, INFINITE, PROCESS_INFORMATION,
+        STARTUPINFOW, WaitForSingleObject,
     };
 
     use geph5_misc_rpc::manager_control::SessionContext;
@@ -486,18 +486,15 @@ mod windows {
             }
 
             CloseHandle(pi.hThread);
-            // Bound the wait: this child is a SYSTEM-spawns-into-user-session
-            // process (the pattern AV/EDR loves to block or stall), and an
-            // unbounded wait would hang the entire disconnect behind it. Give it a
-            // finite window; if it doesn't exit, terminate it and fail cleanly.
-            // With the teardown reordered (kill switch removed before this runs),
-            // that failure no longer strands connectivity — it just surfaces a
-            // proxy-clear error instead of hanging the GUI forever.
-            const APPLY_PROXY_TIMEOUT_MS: u32 = 10_000;
-            if WaitForSingleObject(pi.hProcess, APPLY_PROXY_TIMEOUT_MS) != WAIT_OBJECT_0 {
-                let _ = TerminateProcess(pi.hProcess, 1);
+            // This helper only performs a local registry edit and WinINET
+            // notification. Wait for its actual completion instead of inventing
+            // a timeout that could report failure while it is still alive.
+            if WaitForSingleObject(pi.hProcess, INFINITE) != WAIT_OBJECT_0 {
                 CloseHandle(pi.hProcess);
-                bail!("__apply-proxy child did not exit within {APPLY_PROXY_TIMEOUT_MS} ms; terminated");
+                bail!(
+                    "waiting for __apply-proxy failed: {}",
+                    std::io::Error::last_os_error()
+                );
             }
             let mut code: u32 = 0;
             GetExitCodeProcess(pi.hProcess, &mut code);
@@ -673,6 +670,11 @@ pub(crate) fn state_dir() -> PathBuf {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn manager_log_path() -> PathBuf {
+    state_dir().join("manager.log")
+}
+
 #[allow(dead_code)]
 fn runtime_dir() -> PathBuf {
     #[cfg(target_os = "linux")]
@@ -834,16 +836,19 @@ pub(crate) async fn serve_manager(manager: ManagerImpl) -> anyhow::Result<()> {
         let listener = sillad::unix::UnixListener::bind(&path).await?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
         tracing::info!(path = %path.display(), "geph manager listening for clients");
+        manager.initialize_in_background();
         nanorpc_sillad::rpc_serve(listener, GephCtlService(manager)).await?;
     }
     #[cfg(target_os = "windows")]
     {
         let name = geph5_misc_rpc::manager_control::MANAGER_CONTROL_PIPE;
-        let listener = sillad::windows_pipe::NamedPipeListener::bind(
+        let mut listener = sillad::windows_pipe::NamedPipeListener::bind(
             name,
             Some(sillad::windows_pipe::SDDL_ALLOW_AUTHENTICATED),
         )?;
+        listener.prepare().await?;
         tracing::info!(name, "geph manager listening for clients");
+        manager.initialize_in_background();
         nanorpc_sillad::rpc_serve(listener, GephCtlService(manager)).await?;
     }
     Ok(())
@@ -1135,6 +1140,13 @@ fn spawn_engine_windows(launch: EngineLaunch) -> anyhow::Result<SpawnedEngine> {
 
     let mut command = engine_command()?;
     command.arg("--config").arg(&launch.config_path);
+    if let Ok(log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(manager_log_path())
+    {
+        command.stderr(log);
+    }
     let transport = match launch.packet_mode {
         PacketMode::None => false,
         PacketMode::Stdio => {
@@ -1280,6 +1292,15 @@ pub(crate) fn register_manager() -> anyhow::Result<()> {
         let exe = current_exe_utf8()?;
         let xml_path = std::env::temp_dir().join("geph-manager-task.xml");
         write_utf16le(&xml_path, &task_xml(&exe))?;
+
+        // Replacing a task definition does not replace its currently-running
+        // instance. Stop that instance explicitly before installing the new
+        // definition; its engine children are in a kill-on-job-close job.
+        // Task termination cannot run graceful teardown, so remove any WFP,
+        // route, or DNS state it may have left behind before starting again.
+        let _ = run_status("schtasks", &["/End", "/TN", NAME]);
+        crate::vpn::cleanup_stale();
+
         let create = run_status(
             "schtasks",
             &[
@@ -1392,7 +1413,7 @@ fn launchd_plist(exe: &str) -> String {
     )
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -1402,9 +1423,11 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn task_xml(exe: &str) -> String {
     let exe = xml_escape(exe);
+    // Task Scheduler declares RestartOnFailure/Count as xs:unsignedByte, so 255
+    // is the largest schema-valid retry count.
     format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -1412,7 +1435,7 @@ fn task_xml(exe: &str) -> String {
   <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>
   <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
   <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <AllowHardTerminate>true</AllowHardTerminate>
@@ -1420,12 +1443,31 @@ fn task_xml(exe: &str) -> String {
     <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Enabled>true</Enabled><Hidden>false</Hidden>
-    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>255</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec><Command>{exe}</Command><Arguments>manager</Arguments></Exec></Actions>
 </Task>
 "#
     )
+}
+
+#[cfg(test)]
+mod task_xml_tests {
+    use super::task_xml;
+
+    #[test]
+    fn windows_task_uses_schema_valid_restart_count_and_replaces_old_instance() {
+        let xml = task_xml(r#"C:\Program Files\Geph\geph5.exe"#);
+        assert!(xml.contains("<Count>255</Count>"));
+        assert!(!xml.contains("<Count>999</Count>"));
+        assert!(xml.contains("<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>"));
+    }
+
+    #[test]
+    fn windows_task_escapes_executable_path() {
+        let xml = task_xml(r#"C:\Geph & Friends\geph5.exe"#);
+        assert!(xml.contains(r"C:\Geph &amp; Friends\geph5.exe"));
+    }
 }
 
 #[cfg(target_os = "windows")]

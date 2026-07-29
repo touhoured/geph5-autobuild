@@ -96,14 +96,29 @@ impl Settings {
         self.session_metadata = settings.session_metadata;
     }
 
-    /// Load settings from disk, returning defaults if the file is absent.
+    /// Load settings from disk, returning defaults if the file is absent or
+    /// corrupt. A malformed local settings file must not prevent the manager
+    /// control endpoint from starting.
     pub fn load() -> anyhow::Result<Self> {
         let path = platform::settings_path();
         match std::fs::read(&path) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)
-                .with_context(|| format!("could not parse {}", path.display()))?),
+            Ok(bytes) => Ok(Self::decode_or_default(&bytes, &path)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
             Err(e) => Err(e).with_context(|| format!("could not read {}", path.display())),
+        }
+    }
+
+    fn decode_or_default(bytes: &[u8], path: &std::path::Path) -> Self {
+        match serde_json::from_slice(bytes) {
+            Ok(settings) => settings,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    path = %path.display(),
+                    "manager settings are corrupt; ignoring them and using defaults"
+                );
+                Settings::default()
+            }
         }
     }
 
@@ -185,106 +200,21 @@ fn proxy_listen_addrs(p: &ProxySettings) -> (SocketAddr, SocketAddr, SocketAddr)
     )
 }
 
-/// How long the proxy-port pre-flight keeps retrying before declaring a
-/// conflict: long enough for the just-killed previous engine's listeners to
-/// disappear, short enough not to stall the connect flow noticeably.
-const PORT_PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Verify that the proxy ports the tunnel engine is about to bind are free.
-///
-/// The engine races all its subsystems, so a single failed proxy-port bind
-/// kills the whole child and surfaces only as an opaque "engine never became
-/// reachable" timeout. Checking here instead lets the error name the port and,
-/// where possible, the process holding it. Test-binds use the same
-/// `sillad::tcp::TcpListener` the engine uses, so bind semantics (SO_REUSEADDR
-/// etc.) match exactly.
-pub async fn ensure_proxy_ports_free(proxy: &ProxySettings) -> anyhow::Result<()> {
-    let (socks5, http, pac) = proxy_listen_addrs(proxy);
-    ensure_ports_free(&[socks5, http, pac], PORT_PREFLIGHT_TIMEOUT).await
-}
-
-async fn ensure_ports_free(addrs: &[SocketAddr], timeout: Duration) -> anyhow::Result<()> {
-    let start = std::time::Instant::now();
-    loop {
-        let mut conflict = None;
-        for addr in addrs {
-            if let Err(err) = sillad::tcp::TcpListener::bind(*addr).await {
-                conflict = Some((*addr, err));
-                break;
-            }
-        }
-        let Some((addr, err)) = conflict else {
-            return Ok(());
-        };
-        if start.elapsed() < timeout {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            continue;
-        }
-        let port = addr.port();
-        let holder = geph5_rt::spawn_blocking(move || port_holder(port))
-            .await
-            .map(|h| format!(" by {h}"))
-            .unwrap_or_default();
-        anyhow::bail!(
-            "local proxy port {addr} is already taken{holder} ({err}); close the program using it (an older Geph still running?) or change the proxy ports in settings"
-        );
-    }
-}
-
-/// Best-effort lookup of the process listening on `port`, via lsof.
-#[cfg(unix)]
-fn port_holder(port: u16) -> Option<String> {
-    let output = std::process::Command::new("lsof")
-        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fcp"])
-        .output()
-        .ok()?;
-    // -F output is one field per line: `p<pid>` then `c<command>`.
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut pid = None;
-    let mut cmd = None;
-    for line in text.lines() {
-        match line.as_bytes().first() {
-            Some(b'p') if pid.is_none() => pid = Some(line[1..].to_string()),
-            Some(b'c') if cmd.is_none() => cmd = Some(line[1..].to_string()),
-            _ => {}
-        }
-    }
-    Some(format!("{} (pid {})", cmd?, pid?))
-}
-
-#[cfg(not(unix))]
-fn port_holder(_port: u16) -> Option<String> {
-    None
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Settings, build_tunnel_config, ensure_ports_free};
+    use super::{Settings, build_tunnel_config};
     use geph5_broker_protocol::ExitConstraint;
     use geph5_misc_rpc::manager_control::{ProxySettings, TunnelSettings};
-    use std::time::Duration;
 
     #[test]
-    fn ports_free_passes_on_unused_ports() {
-        // Grab ephemeral ports, then release them so the pre-flight sees them free.
-        let addrs: Vec<_> = (0..2)
-            .map(|_| {
-                std::net::TcpListener::bind("127.0.0.1:0")
-                    .unwrap()
-                    .local_addr()
-                    .unwrap()
-            })
-            .collect();
-        geph5_rt::block_on(ensure_ports_free(&addrs, Duration::from_millis(100))).unwrap();
-    }
-
-    #[test]
-    fn ports_free_names_the_conflicting_port() {
-        let holder = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let taken = holder.local_addr().unwrap();
-        let err = geph5_rt::block_on(ensure_ports_free(&[taken], Duration::from_millis(100)))
-            .unwrap_err();
-        assert!(err.to_string().contains(&taken.to_string()), "{err}");
+    fn corrupt_settings_are_treated_as_missing() {
+        let settings =
+            Settings::decode_or_default(b"{ definitely not JSON", "settings.json".as_ref());
+        assert!(settings.secret.is_none());
+        assert!(!settings.connected);
+        assert!(settings.vpn);
+        assert!(settings.allow_lan);
+        assert!(settings.proxy.is_none());
     }
 
     #[test]
@@ -439,29 +369,24 @@ pub fn query_control() -> ControlClient {
     platform::engine_control(EngineRole::Query)
 }
 
-/// Wait until the given engine's control protocol answers, up to `timeout`.
-/// Fails fast, with the exit status, if the engine process dies first.
+/// Wait until the given engine's local control protocol answers. The endpoint is
+/// bound independently of the engine's network work, so elapsed time is not a
+/// meaningful failure signal; only a child exit is.
 pub async fn wait_control_ready(
     child: &mut std::process::Child,
     client: &ControlClient,
-    timeout: Duration,
 ) -> anyhow::Result<()> {
-    let deadline = Duration::from_millis(100);
-    let start = std::time::Instant::now();
     loop {
         // start_time() is a cheap, always-available control method.
         match client.start_time().await {
             Ok(_) => return Ok(()),
-            Err(e) => {
+            Err(_) => {
                 if let Ok(Some(status)) = child.try_wait() {
                     anyhow::bail!(
                         "engine exited during startup ({status}); see the manager log for the engine's own error"
                     );
                 }
-                if start.elapsed() >= timeout {
-                    anyhow::bail!("engine never became reachable: {e:?}");
-                }
-                tokio::time::sleep(deadline).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
     }

@@ -26,7 +26,6 @@ use crate::{
     vpn,
 };
 
-const CHILD_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const CHILD_HEALTH_INTERVAL: Duration = Duration::from_secs(3);
 
 enum ChildRecovery {
@@ -75,15 +74,12 @@ pub struct ManagerImpl {
 }
 
 impl ManagerImpl {
-    /// Load settings, spawn the permanent query engine and (if persisted as
-    /// connected) the tunnel engine, then return the manager.
-    pub async fn start() -> anyhow::Result<Self> {
-        // Purge any VPN state stranded by a prior crash / `kill -9`, so we never
-        // start on a half-configured, blackholed machine. This runs regardless of
-        // persisted state, including when the manager starts disconnected.
-        vpn::cleanup_stale();
+    /// Load local settings and construct the manager. Child/VPN reconciliation
+    /// starts only after the manager control listener has been bound, so clients
+    /// can always distinguish a live manager from a missing one immediately.
+    pub fn start() -> anyhow::Result<Self> {
         let settings = Settings::load()?;
-        let this = ManagerImpl {
+        Ok(ManagerImpl {
             inner: std::sync::Arc::new(Mutex::new(Inner {
                 settings,
                 query: None,
@@ -94,12 +90,30 @@ impl ManagerImpl {
                 desktop_session: None,
                 shutting_down: false,
             })),
-        };
-        let mut inner = this.inner.lock().await;
+        })
+    }
+
+    /// Start local child/VPN reconciliation after the manager listener exists.
+    /// The state lock serializes ordinary RPCs behind this short initialization,
+    /// while `ping` deliberately remains lock-free.
+    pub(crate) fn initialize_in_background(&self) {
+        let this = self.clone();
+        geph5_rt::spawn(async move {
+            this.initialize().await;
+        })
+        .detach();
+    }
+
+    async fn initialize(&self) {
+        let mut inner = self.inner.lock().await;
+        // Purge any VPN state stranded by a prior crash / forced task stop, so
+        // we never start on a half-configured, blackholed machine. This is local
+        // machine state only and never waits on the network.
+        vpn::cleanup_stale();
         // The query engine must be up for broker queries; bring it up first.
         // Non-fatal if it fails — the manager still serves settings/connect, and
         // query calls will surface a clear error until it recovers.
-        if let Err(e) = this.ensure_query_engine(&mut inner).await {
+        if let Err(e) = self.ensure_query_engine(&mut inner).await {
             tracing::warn!(err = %e, "query engine failed to start; broker queries unavailable");
         }
         // Restore connection state (spawns the tunnel + VPN kill-switch if the
@@ -111,8 +125,6 @@ impl ManagerImpl {
             let _ = inner.settings.save();
             let _ = Self::reconcile_tunnel(&mut inner).await;
         }
-        drop(inner);
-        Ok(this)
     }
 
     /// Spawn the permanent query engine if it is not already running.
@@ -130,12 +142,8 @@ impl ManagerImpl {
         let service_user =
             platform::ensure_service_user().map_err(|e| format!("engine service user: {e:#}"))?;
         let mut child = supervisor::spawn_query(service_user).map_err(|e| format!("{e:?}"))?;
-        if let Err(error) = supervisor::wait_control_ready(
-            &mut child,
-            &supervisor::query_control(),
-            CHILD_READY_TIMEOUT,
-        )
-        .await
+        if let Err(error) =
+            supervisor::wait_control_ready(&mut child, &supervisor::query_control()).await
         {
             geph5_rt::spawn_blocking(move || platform::kill_child(child)).await;
             return Err(format!("{error:?}"));
@@ -166,25 +174,16 @@ impl ManagerImpl {
 
         if !inner.settings.connected {
             // Fail-closed teardown must be unconditional and come first. Tear the
-            // VPN kill switch (and routes/DNS) down before the fallible, possibly
-            // hanging system-proxy restore — the proxy step does a
-            // CreateProcessAsUserW into the console session and an unbounded wait,
-            // so ordering it ahead of cleanup (with `?`) could return early and
-            // strand the machine behind a default-block filter with no engine to
-            // carry traffic. This mirrors `shutdown_teardown`'s ordering; the tunnel
-            // child is already dead by here, so the kill switch has nothing to guard.
+            // VPN kill switch (and routes/DNS) down before the fallible
+            // system-proxy restore. That local helper is awaited to actual
+            // completion, so ordering it ahead of cleanup could postpone cleanup
+            // indefinitely or return on error and strand the machine behind a
+            // default-block filter with no engine to carry traffic. This mirrors
+            // `shutdown_teardown`'s ordering; the tunnel child is already dead by
+            // here, so the kill switch has nothing to guard.
             inner.vpn.cleanup();
             reconcile_system_proxy(inner).await?;
             return Ok(());
-        }
-
-        // The old child is dead by here, so any conflict on the proxy ports is a
-        // foreign process; report it by name rather than letting the engine die
-        // on the bind and time out opaquely.
-        if let Some(proxy) = &inner.settings.proxy {
-            supervisor::ensure_proxy_ports_free(proxy)
-                .await
-                .map_err(|e| format!("{e:#}"))?;
         }
 
         let service_user =
@@ -211,12 +210,8 @@ impl ManagerImpl {
             return Err(format!("attaching VPN packet transport: {error:#}"));
         }
         let mut child = spawned.child;
-        if let Err(error) = supervisor::wait_control_ready(
-            &mut child,
-            &supervisor::live_control(),
-            CHILD_READY_TIMEOUT,
-        )
-        .await
+        if let Err(error) =
+            supervisor::wait_control_ready(&mut child, &supervisor::live_control()).await
         {
             inner.vpn.stop_transport();
             platform::kill_child(child);
@@ -356,6 +351,10 @@ fn exit_info_from(
 
 #[async_trait]
 impl GephCtlProtocol for ManagerImpl {
+    async fn ping(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     async fn login(&self, secret: String) -> Result<AccountInfo, String> {
         let secret = secret.trim().to_string();
         // Validate before persisting anything.
@@ -615,7 +614,7 @@ async fn shutdown_teardown(inner: &Mutex<Inner>, teardown_lock: &Mutex<()>) {
 
 /// Run the manager forever: spawn the children and serve the CLI control protocol.
 pub async fn run_manager() -> anyhow::Result<()> {
-    let manager = ManagerImpl::start().await?;
+    let manager = ManagerImpl::start()?;
     let teardown_lock = std::sync::Arc::new(Mutex::new(()));
 
     // Graceful shutdown: on a termination signal, tear the VPN down and exit. Without

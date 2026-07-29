@@ -207,6 +207,10 @@ impl SettingsView {
 #[nanorpc_derive]
 #[async_trait]
 pub trait GephCtlProtocol {
+    /// Cheap liveness probe for the manager control endpoint. This must not
+    /// acquire the manager's state lock or contact the engine/broker.
+    async fn ping(&self) -> Result<(), String>;
+
     /// Validate a secret, persist it, and (re)start the child with it.
     async fn login(&self, secret: String) -> Result<AccountInfo, String>;
     /// Persist a secret WITHOUT validating it against the broker, restarting the

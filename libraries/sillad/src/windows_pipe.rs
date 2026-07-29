@@ -143,9 +143,10 @@ impl NamedPipeListener {
     /// every instance (e.g. [`SDDL_ALLOW_AUTHENTICATED`]); when `None`, the pipe
     /// gets the default DACL (creator + system only).
     ///
-    /// Binding is cheap and infallible: the first instance (with
-    /// `FILE_FLAG_FIRST_PIPE_INSTANCE` for anti-squatting) is created on the
-    /// first `accept`, since handle creation must run inside the tokio reactor.
+    /// Binding is cheap and infallible: unless [`prepare`](Self::prepare) is
+    /// called, the first instance (with `FILE_FLAG_FIRST_PIPE_INSTANCE` for
+    /// anti-squatting) is created on the first `accept`, since handle creation
+    /// must run inside the tokio reactor.
     pub fn bind(name: impl AsRef<str>, sddl: Option<&str>) -> io::Result<Self> {
         Ok(Self {
             name_w: to_wide(name.as_ref()),
@@ -153,6 +154,16 @@ impl NamedPipeListener {
             next: None,
             first: true,
         })
+    }
+
+    /// Create the first OS pipe instance before accepting clients. Calling this
+    /// from an async context lets a server publish its endpoint before starting
+    /// unrelated background initialization.
+    pub async fn prepare(&mut self) -> io::Result<()> {
+        if self.next.is_none() {
+            self.next = Some(self.make_instance()?);
+        }
+        Ok(())
     }
 
     fn make_instance(&mut self) -> io::Result<NamedPipeServer> {
