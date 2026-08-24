@@ -116,6 +116,20 @@ pub fn apply(utun: &str, uid: u32, allow_lan: bool) -> anyhow::Result<PfState> {
                     .tcp_flags(syn_only())
                     .build()?,
             );
+            // Let a LAN peer's inbound SYN create state so the listener's
+            // outbound SYN-ACK does not fall through to the final block. Match
+            // the peer's source explicitly so non-LAN inbound traffic cannot
+            // create an outbound exception in the kill switch (#158).
+            rules.push(
+                FilterRuleBuilder::default()
+                    .action(FilterRuleAction::Pass)
+                    .direction(Direction::In)
+                    .quick(true)
+                    .from(pfctl::Ip::from(net))
+                    .keep_state(StatePolicy::Keep)
+                    .tcp_flags(syn_only())
+                    .build()?,
+            );
         }
     }
     rules.push(
