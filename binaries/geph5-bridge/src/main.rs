@@ -65,10 +65,8 @@ fn main() {
 
         {
             let auth_token = auth_token.clone();
-            geph5_rt::spawn(
-                async move { stats::stats_flush_loop(&auth_token, broker_addr).await },
-            )
-            .detach();
+            geph5_rt::spawn(async move { stats::stats_flush_loop(&auth_token, broker_addr).await })
+                .detach();
         }
 
         let mut instances = vec![new_bridge_instance(

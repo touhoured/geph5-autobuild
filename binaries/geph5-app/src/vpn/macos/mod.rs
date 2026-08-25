@@ -45,8 +45,8 @@ use route_socket::{Gateway, RouteSocket, RouteSpec};
 
 mod discovery;
 mod dns;
-mod ipv6_presence;
 mod firewall;
+mod ipv6_presence;
 mod route_socket;
 
 // tun addressing — v4 matches the Linux/Windows implementations.
@@ -307,7 +307,8 @@ impl VpnHandle {
         // Enable the all-interface kill switch before capture routes are installed.
         // Record the token first so the setup guard can release our reference if
         // loading the rules fails.
-        self.pf_state = Some(firewall::apply(&ifname, uid, allow_lan).context("applying PF kill switch")?);
+        self.pf_state =
+            Some(firewall::apply(&ifname, uid, allow_lan).context("applying PF kill switch")?);
 
         upsert_split_routes(&ifname)?;
 
@@ -323,8 +324,7 @@ impl VpnHandle {
         add_scoped_default(&self.phys).context("installing interface-scoped default route")?;
 
         self.dns_backup = dns::set_sentinel(SENTINEL_DNS_V4, SENTINEL_DNS_V6);
-        self.v6_presence_path =
-            ipv6_presence::publish(&self.phys.v4_service_id, &ifname, TUN_V6);
+        self.v6_presence_path = ipv6_presence::publish(&self.phys.v4_service_id, &ifname, TUN_V6);
         Ok(())
     }
 }
@@ -332,11 +332,7 @@ impl VpnHandle {
 /// Reassert the complete macOS VPN configuration without replacing the live
 /// utun. PF is loaded first and blocks all physical egress, so route repair and
 /// physical-interface changes remain fail-closed.
-pub(super) fn reconcile(
-    handle: &mut VpnHandle,
-    uid: u32,
-    allow_lan: bool,
-) -> anyhow::Result<()> {
+pub(super) fn reconcile(handle: &mut VpnHandle, uid: u32, allow_lan: bool) -> anyhow::Result<()> {
     // Re-derive the physical egress so a real network switch (Wi-Fi <-> Ethernet)
     // is picked up, but fall back to the interface captured at setup when the live
     // default route can't be resolved to a real NIC — the network is momentarily
@@ -393,8 +389,7 @@ pub(super) fn reconcile(
     {
         ipv6_presence::remove(&old);
     }
-    handle.v6_presence_path =
-        ipv6_presence::publish(&handle.phys.v4_service_id, &ifname, TUN_V6);
+    handle.v6_presence_path = ipv6_presence::publish(&handle.phys.v4_service_id, &ifname, TUN_V6);
     Ok(())
 }
 
@@ -620,10 +615,6 @@ fn del_scoped_default(phys: &PhysIface) {
     }
 }
 
-
-
-
-
 #[derive(Clone)]
 pub(super) struct NetworkSnapshot {
     phys: PhysIface,
@@ -671,9 +662,7 @@ fn scoped_default_ok(phys: &PhysIface) -> bool {
         gateway: Gateway::Ip(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
         ifscope: Some(idx as u16),
     }) {
-        Ok(Some(info)) => {
-            info.gateway == Some(IpAddr::V4(*gw)) && u32::from(info.ifindex) == idx
-        }
+        Ok(Some(info)) => info.gateway == Some(IpAddr::V4(*gw)) && u32::from(info.ifindex) == idx,
         _ => false,
     }
 }

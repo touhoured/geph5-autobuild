@@ -145,7 +145,11 @@ impl BwAccount {
                             );
                             return;
                         }
-                        tracing::debug!(err = debug(err), attempt, "bw token redemption failed, retrying");
+                        tracing::debug!(
+                            err = debug(err),
+                            attempt,
+                            "bw token redemption failed, retrying"
+                        );
                         tokio::time::sleep(delay).await;
                         delay *= 2;
                     }

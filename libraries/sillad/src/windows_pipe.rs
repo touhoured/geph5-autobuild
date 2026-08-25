@@ -34,7 +34,9 @@ use windows_sys::Win32::{
         Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1},
         PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
     },
-    Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX},
+    Storage::FileSystem::{
+        FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
+    },
     System::Pipes::{
         CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
         PIPE_UNLIMITED_INSTANCES,
@@ -51,7 +53,10 @@ const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 pub const SDDL_ALLOW_AUTHENTICATED: &str = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
 
 fn to_wide(s: &str) -> Vec<u16> {
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// Create a single named-pipe server instance via the raw Win32 API so we can
@@ -237,7 +242,11 @@ impl AsyncRead for NamedPipe {
 }
 
 impl AsyncWrite for NamedPipe {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
         match self.project() {
             NamedPipeProj::Server(s) => s.poll_write(cx, buf),
             NamedPipeProj::Client(c) => c.poll_write(cx, buf),

@@ -62,12 +62,8 @@ fn server_addresses(store: &SCDynamicStore, path: &str) -> Option<Vec<String>> {
 }
 
 fn dns_dict(servers: &[&str]) -> CFDictionary<CFString, CFType> {
-    let addrs = CFArray::from_CFTypes(
-        &servers
-            .iter()
-            .map(|s| CFString::new(s))
-            .collect::<Vec<_>>(),
-    );
+    let addrs =
+        CFArray::from_CFTypes(&servers.iter().map(|s| CFString::new(s)).collect::<Vec<_>>());
     CFDictionary::from_CFType_pairs(&[(CFString::new(SERVER_ADDRESSES), addrs.as_CFType())])
 }
 

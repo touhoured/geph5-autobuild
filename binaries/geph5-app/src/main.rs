@@ -10,6 +10,8 @@ mod manager;
 mod platform;
 mod supervisor;
 mod vpn;
+#[cfg(target_os = "windows")]
+mod windows_service;
 
 use clap::Parser;
 
@@ -19,6 +21,8 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Manager => run_manager_command(),
+        #[cfg(target_os = "windows")]
+        Command::ManagerService => windows_service::run_dispatcher(),
         // Background (un)registration runs directly, without contacting the
         // manager; it installs the platform autostart service, so it needs
         // root/Administrator like the manager.
@@ -48,7 +52,7 @@ fn run_manager_command() -> anyhow::Result<()> {
 
     let result = (|| {
         platform::require_manager_privilege()?;
-        geph5_rt::block_on(manager::run_manager())
+        geph5_rt::block_on(manager::run_manager(platform::shutdown_signal(), || {}))
     })();
     if let Err(error) = &result {
         tracing::error!(error = %format!("{error:#}"), "geph manager exited with an error");
@@ -56,7 +60,7 @@ fn run_manager_command() -> anyhow::Result<()> {
     result
 }
 
-fn init_manager_logging() {
+pub(crate) fn init_manager_logging() {
     #[cfg(target_os = "windows")]
     match windows_manager_log_writer() {
         Ok(writer) => {

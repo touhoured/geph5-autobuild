@@ -28,7 +28,10 @@ fn main() -> anyhow::Result<()> {
         let t0 = std::time::Instant::now();
         match client.connect(SessionContext::default()).await {
             Ok(Ok(())) => println!("connect() OK in {:.2}s", t0.elapsed().as_secs_f64()),
-            Ok(Err(e)) => println!("connect() MANAGER ERROR after {:.2}s: {e}", t0.elapsed().as_secs_f64()),
+            Ok(Err(e)) => println!(
+                "connect() MANAGER ERROR after {:.2}s: {e}",
+                t0.elapsed().as_secs_f64()
+            ),
             Err(e) => println!("connect() TRANSPORT ERROR: {e:?}"),
         }
 

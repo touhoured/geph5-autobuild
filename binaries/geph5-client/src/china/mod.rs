@@ -206,7 +206,10 @@ mod tests {
                 // Real public addresses: not in the fake-DNS pool, not
                 // private/reserved.
                 assert!(!ip.is_private() && !ip.is_loopback() && !ip.is_unspecified());
-                assert_ne!(u32::from(ip) & 0xFFFE_0000, u32::from_be_bytes([198, 18, 0, 0]));
+                assert_ne!(
+                    u32::from(ip) & 0xFFFE_0000,
+                    u32::from_be_bytes([198, 18, 0, 0])
+                );
             }
         });
     }

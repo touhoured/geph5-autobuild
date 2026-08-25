@@ -120,9 +120,7 @@ pub async fn open_conn(
             dest_addr = debug(dest_addr),
             "passing through whitelisted address"
         );
-        return Ok(Box::new(
-            crate::bound_dialer::connect_addrs(&addrs).await?,
-        ));
+        return Ok(Box::new(crate::bound_dialer::connect_addrs(&addrs).await?));
     }
 
     let cmd = RichTunnelCommand {
@@ -323,9 +321,7 @@ fn needs_direct_china_resolution(ctx: &AnyCtx<Config>, host: &str) -> bool {
         .strip_prefix('[')
         .and_then(|h| h.strip_suffix(']'))
         .unwrap_or(host);
-    ctx.init().spoof_dns
-        && crate::bound_dialer::binding_active()
-        && IpAddr::from_str(bare).is_err()
+    ctx.init().spoof_dns && crate::bound_dialer::binding_active() && IpAddr::from_str(bare).is_err()
 }
 
 fn whitelist_host(ctx: &AnyCtx<Config>, host: &str) -> bool {

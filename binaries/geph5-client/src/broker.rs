@@ -31,8 +31,8 @@ use crate::{
 // an engine without depending on it); the behavior that turns them into live
 // transports stays here on the `ConfigHelperExt` extension trait. Re-exported so
 // `geph5_client::broker` paths keep working.
-pub use geph5_misc_rpc::client_config::{BrokerSource, TunneledBrokerSource};
 use geph5_misc_rpc::client_config::Config;
+pub use geph5_misc_rpc::client_config::{BrokerSource, TunneledBrokerSource};
 
 /// Engine-side behavior bolted onto the plain config descriptors that live in
 /// `geph5-misc-rpc`: turning a broker source into a live RPC transport.

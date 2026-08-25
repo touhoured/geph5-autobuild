@@ -243,11 +243,7 @@ fn uninstall_orphaned_adapter() -> anyhow::Result<()> {
         .collect();
     let mut device = 0;
     match unsafe {
-        CM_Locate_DevNodeW(
-            &mut device,
-            instance_id.as_ptr(),
-            CM_LOCATE_DEVNODE_PHANTOM,
-        )
+        CM_Locate_DevNodeW(&mut device, instance_id.as_ptr(), CM_LOCATE_DEVNODE_PHANTOM)
     } {
         CR_SUCCESS => {}
         CR_NO_SUCH_DEVNODE => return Ok(()),

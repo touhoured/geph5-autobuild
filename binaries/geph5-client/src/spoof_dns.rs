@@ -25,8 +25,7 @@ const FAKE_DNS_CAPACITY: u64 = 60_000;
 /// Reverse map fake IP -> name. Given generous headroom so it is pruned *only* by
 /// the forward cache's eviction listener (below) and never self-evicts, which
 /// would otherwise strand a still-live forward mapping.
-static FAKE_DNS_BACKWARD: CtxField<Cache<Ipv4Addr, String>> =
-    |_| Cache::new(FAKE_DNS_CAPACITY * 2);
+static FAKE_DNS_BACKWARD: CtxField<Cache<Ipv4Addr, String>> = |_| Cache::new(FAKE_DNS_CAPACITY * 2);
 
 /// Forward map name -> fake IP, and the source of truth for capacity. Its
 /// eviction listener drops the matching reverse entry so the two stay consistent
@@ -35,9 +34,11 @@ static FAKE_DNS_FORWARD: CtxField<Cache<String, Ipv4Addr>> = |ctx| {
     let backward = ctx.get(FAKE_DNS_BACKWARD).clone();
     Cache::builder()
         .max_capacity(FAKE_DNS_CAPACITY)
-        .eviction_listener(move |_name: Arc<String>, ip: Ipv4Addr, _cause: RemovalCause| {
-            backward.invalidate(&ip);
-        })
+        .eviction_listener(
+            move |_name: Arc<String>, ip: Ipv4Addr, _cause: RemovalCause| {
+                backward.invalidate(&ip);
+            },
+        )
         .build()
 };
 
@@ -165,14 +166,23 @@ mod tests {
         let a = fake_dns_allocate(&ctx, "a.example.com");
         let b = fake_dns_allocate(&ctx, "b.example.com");
         assert_ne!(a, b);
-        assert_eq!(fake_dns_backtranslate(&ctx, a).as_deref(), Some("a.example.com"));
-        assert_eq!(fake_dns_backtranslate(&ctx, b).as_deref(), Some("b.example.com"));
+        assert_eq!(
+            fake_dns_backtranslate(&ctx, a).as_deref(),
+            Some("a.example.com")
+        );
+        assert_eq!(
+            fake_dns_backtranslate(&ctx, b).as_deref(),
+            Some("b.example.com")
+        );
     }
 
     #[test]
     fn unknown_ip_backtranslates_to_none() {
         let ctx = test_ctx();
-        assert_eq!(fake_dns_backtranslate(&ctx, Ipv4Addr::new(198, 18, 0, 1)), None);
+        assert_eq!(
+            fake_dns_backtranslate(&ctx, Ipv4Addr::new(198, 18, 0, 1)),
+            None
+        );
     }
 
     fn resolve_via_spoofer(ctx: &AnyCtx<Config>, name: &str) -> Ipv4Addr {

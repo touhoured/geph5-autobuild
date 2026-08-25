@@ -71,8 +71,7 @@ pub fn global_buffer_table_stats() -> GlobalBufferTableStats {
     for entry in guard.values() {
         // Entries are removed on table drop, so the weaks normally upgrade; skip
         // any caught mid-drop rather than counting a dead table.
-        let (Some(inner), Some(tombstones)) =
-            (entry.inner.upgrade(), entry.tombstones.upgrade())
+        let (Some(inner), Some(tombstones)) = (entry.inner.upgrade(), entry.tombstones.upgrade())
         else {
             continue;
         };

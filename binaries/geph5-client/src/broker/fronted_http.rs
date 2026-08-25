@@ -60,7 +60,11 @@ impl RpcTransport for FrontedHttpTransport {
                         .context("could not resolve broker front over the physical NIC")?
                 }
             };
-            if reqwest::Url::parse(&self.url).ok().and_then(|u| u.port()).is_some() {
+            if reqwest::Url::parse(&self.url)
+                .ok()
+                .and_then(|u| u.port())
+                .is_some()
+            {
                 tracing::warn!(
                     url = self.url,
                     "front URL has an explicit port; the loopback egress forwarder may be bypassed"

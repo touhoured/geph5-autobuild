@@ -32,7 +32,10 @@ fn v6_dict(tun_ifname: &str, tun_v6: &str) -> CFDictionary<CFString, CFType> {
     CFDictionary::from_CFType_pairs(&[
         (CFString::new("Addresses"), addrs.as_CFType()),
         (CFString::new("PrefixLength"), prefixes.as_CFType()),
-        (CFString::new("InterfaceName"), CFString::new(tun_ifname).as_CFType()),
+        (
+            CFString::new("InterfaceName"),
+            CFString::new(tun_ifname).as_CFType(),
+        ),
         (CFString::new("Router"), CFString::new(tun_v6).as_CFType()),
     ])
 }
@@ -41,7 +44,10 @@ fn v6_dict(tun_ifname: &str, tun_v6: &str) -> CFDictionary<CFString, CFType> {
 pub fn publish(service_id: &str, tun_ifname: &str, tun_v6: &str) -> Option<String> {
     let path = format!("State:/Network/Service/{service_id}/IPv6");
     store()
-        .set(CFString::new(&path), v6_dict(tun_ifname, tun_v6).to_untyped())
+        .set(
+            CFString::new(&path),
+            v6_dict(tun_ifname, tun_v6).to_untyped(),
+        )
         .then_some(path)
 }
 
@@ -64,8 +70,7 @@ pub fn cleanup_stale(marker: &str) {
             let dict = store
                 .get(CFString::new(&path))?
                 .downcast_into::<CFDictionary>()?;
-            let v =
-                dict.find(CFString::new("Addresses").as_CFType().as_CFTypeRef() as *const _)?;
+            let v = dict.find(CFString::new("Addresses").as_CFType().as_CFTypeRef() as *const _)?;
             let arr = unsafe { CFArray::<CFString>::wrap_under_get_rule(*v as *const _) };
             Some(arr.iter().any(|s| s.to_string().starts_with(marker)))
         })()

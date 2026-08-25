@@ -600,8 +600,10 @@ mod windows {
 
 // ---- platform-neutral application boundary ----
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::path::Path;
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
@@ -842,7 +844,10 @@ fn engine_pipe_name(role: EngineRole) -> &'static str {
     }
 }
 
-pub(crate) async fn serve_manager(manager: ManagerImpl) -> anyhow::Result<()> {
+pub(crate) async fn serve_manager<R>(manager: ManagerImpl, on_ready: R) -> anyhow::Result<()>
+where
+    R: FnOnce() + Send + 'static,
+{
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -853,6 +858,7 @@ pub(crate) async fn serve_manager(manager: ManagerImpl) -> anyhow::Result<()> {
         let listener = sillad::unix::UnixListener::bind(&path).await?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))?;
         tracing::info!(path = %path.display(), "geph manager listening for clients");
+        on_ready();
         manager.initialize_in_background();
         nanorpc_sillad::rpc_serve(listener, GephCtlService(manager)).await?;
     }
@@ -865,6 +871,7 @@ pub(crate) async fn serve_manager(manager: ManagerImpl) -> anyhow::Result<()> {
         )?;
         listener.prepare().await?;
         tracing::info!(name, "geph manager listening for clients");
+        on_ready();
         manager.initialize_in_background();
         nanorpc_sillad::rpc_serve(listener, GephCtlService(manager)).await?;
     }
@@ -1412,14 +1419,13 @@ pub(crate) fn register_manager() -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         const NAME: &str = "Geph Manager";
-        let exe = current_exe_utf8()?;
-        let xml_path = std::env::temp_dir().join("geph-manager-task.xml");
-        write_utf16le(&xml_path, &task_xml(&exe))?;
+        let executable = current_exe_path()?;
 
-        // Register before stopping the task so an asynchronous WinTUN device
-        // removal cannot race past us. WinTUN removes an adapter when the process
-        // that created it exits; starting a new creator while that PnP removal is
-        // incomplete can collide with the old software-device instance.
+        // Subscribe before stopping a legacy scheduled-task manager so an
+        // asynchronous WinTUN device removal cannot race past us. WinTUN removes
+        // an adapter when the process that created it exits; starting a new
+        // creator while that PnP removal is incomplete can collide with the old
+        // software-device instance.
         let adapter_removal = crate::vpn::prepare_adapter_removal()?;
 
         // Capture the exact task processes before stopping them. `/End` requests
@@ -1437,30 +1443,12 @@ pub(crate) fn register_manager() -> anyhow::Result<()> {
             }
         }
 
-        let create = run_status(
-            "schtasks",
-            &[
-                "/Create",
-                "/TN",
-                NAME,
-                "/XML",
-                xml_path.to_str().context("temporary path is not UTF-8")?,
-                "/F",
-            ],
-        );
-        let _ = std::fs::remove_file(&xml_path);
-        if let Err(error) = create {
-            // No replacement will run its startup cleanup, so leave the machine
-            // usable if task registration itself fails after the old manager was
-            // terminated.
+        let _ = run_status("schtasks", &["/Delete", "/TN", NAME, "/F"]);
+        if let Err(error) = crate::windows_service::register_and_start(&executable) {
             crate::vpn::cleanup_stale();
             return Err(error);
         }
-        if let Err(error) = run_status("schtasks", &["/Run", "/TN", NAME]) {
-            crate::vpn::cleanup_stale();
-            return Err(error);
-        }
-        println!("Registered and started the \"{NAME}\" scheduled task.");
+        println!("Registered and started the {NAME} Windows service.");
         Ok(())
     }
 }
@@ -1515,6 +1503,7 @@ pub(crate) fn unregister_manager() -> anyhow::Result<()> {
         // them here directly. (Intercepting TerminateProcess is impossible by
         // design; the installer's *upgrade* path is instead covered by the new
         // manager's own startup `cleanup_stale`.)
+        crate::windows_service::stop_and_delete()?;
         let _ = run_status("schtasks", &["/End", "/TN", NAME]);
         let _ = run_status("schtasks", &["/Delete", "/TN", NAME, "/F"]);
         crate::vpn::cleanup_stale();
@@ -1522,20 +1511,25 @@ pub(crate) fn unregister_manager() -> anyhow::Result<()> {
             clear_system_proxy_for_unregistration()
                 .context("clearing Geph system proxy during unregistration")?;
         }
-        println!("Unregistered the \"{NAME}\" scheduled task.");
+        println!("Unregistered the {NAME} Windows service.");
         Ok(())
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn current_exe_utf8() -> anyhow::Result<String> {
-    let exe = std::env::current_exe()
-        .context("could not determine the geph5 executable path")?
-        .canonicalize()
-        .context("could not resolve the geph5 executable path")?;
+    let exe = current_exe_path()?;
     Ok(exe
         .to_str()
         .context("the geph5 executable path is not UTF-8")?
         .to_string())
+}
+
+fn current_exe_path() -> anyhow::Result<PathBuf> {
+    std::env::current_exe()
+        .context("could not determine the geph5 executable path")?
+        .canonicalize()
+        .context("could not resolve the geph5 executable path")
 }
 
 #[cfg(target_os = "macos")]
@@ -1572,7 +1566,7 @@ fn launchd_plist(exe: &str) -> String {
     )
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(target_os = "macos")]
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -1580,63 +1574,6 @@ fn xml_escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn task_xml(exe: &str) -> String {
-    let exe = xml_escape(exe);
-    // Task Scheduler declares RestartOnFailure/Count as xs:unsignedByte, so 255
-    // is the largest schema-valid retry count.
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>Geph5 privileged manager</Description></RegistrationInfo>
-  <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>
-  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
-  <Settings>
-    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Enabled>true</Enabled><Hidden>false</Hidden>
-    <RestartOnFailure><Interval>PT1M</Interval><Count>255</Count></RestartOnFailure>
-  </Settings>
-  <Actions Context="Author"><Exec><Command>{exe}</Command><Arguments>manager</Arguments></Exec></Actions>
-</Task>
-"#
-    )
-}
-
-#[cfg(test)]
-mod task_xml_tests {
-    use super::task_xml;
-
-    #[test]
-    fn windows_task_uses_schema_valid_restart_count_and_replaces_old_instance() {
-        let xml = task_xml(r#"C:\Program Files\Geph\geph5.exe"#);
-        assert!(xml.contains("<Count>255</Count>"));
-        assert!(!xml.contains("<Count>999</Count>"));
-        assert!(xml.contains("<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>"));
-    }
-
-    #[test]
-    fn windows_task_escapes_executable_path() {
-        let xml = task_xml(r#"C:\Geph & Friends\geph5.exe"#);
-        assert!(xml.contains(r"C:\Geph &amp; Friends\geph5.exe"));
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn write_utf16le(path: &Path, value: &str) -> std::io::Result<()> {
-    let mut bytes = Vec::with_capacity(2 + value.len() * 2);
-    bytes.extend_from_slice(&[0xff, 0xfe]);
-    for unit in value.encode_utf16() {
-        bytes.extend_from_slice(&unit.to_le_bytes());
-    }
-    std::fs::write(path, bytes)
 }
 
 #[cfg(target_os = "macos")]

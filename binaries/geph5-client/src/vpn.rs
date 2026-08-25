@@ -124,7 +124,8 @@ pub async fn vpn_loop(ctx: &AnyCtx<crate::Config>) -> anyhow::Result<()> {
 
                 let task = geph5_rt::spawn(async move {
                     let mut captured = captured;
-                    let tunneled = match open_conn(&ctx_clone, "tcp", &peer_addr.to_string()).await {
+                    let tunneled = match open_conn(&ctx_clone, "tcp", &peer_addr.to_string()).await
+                    {
                         Ok(tunneled) => tunneled,
                         Err(err) => {
                             // The exit reports the dial error (e.g. "Connection
@@ -168,6 +169,7 @@ pub async fn vpn_loop(ctx: &AnyCtx<crate::Config>) -> anyhow::Result<()> {
                     peer_addr = display(peer_addr),
                     "captured a UDP"
                 );
+                let local_addr = captured.local_addr();
                 let peer_addr = if captured.peer_addr().port() == 53 {
                     if captured.peer_addr().is_ipv6() {
                         "[2606:4700:4700::1111]:53".parse()?
@@ -179,41 +181,57 @@ pub async fn vpn_loop(ctx: &AnyCtx<crate::Config>) -> anyhow::Result<()> {
                 };
                 let ctx_clone = ctx.clone();
                 let task = geph5_rt::spawn(async move {
-                    if peer_addr.port() == 53 && ctx_clone.init().spoof_dns {
-                        // fakedns handling
-                        loop {
-                            let pkt = captured.recv().await?;
-                            captured.send(&fake_dns_respond(&ctx_clone, &pkt)?).await?;
+                    let result: anyhow::Result<()> = async {
+                        if peer_addr.port() == 53 && ctx_clone.init().spoof_dns {
+                            // fakedns handling
+                            loop {
+                                let pkt = captured.recv().await?;
+                                captured.send(&fake_dns_respond(&ctx_clone, &pkt)?).await?;
+                            }
+                        } else {
+                            let tunneled =
+                                open_conn(&ctx_clone, "udp", &peer_addr.to_string()).await?;
+                            let (mut read_tunneled, mut write_tunneled) =
+                                tokio::io::split(tunneled);
+                            let up_loop = async {
+                                loop {
+                                    let to_up = captured.recv().await?;
+                                    write_tunneled
+                                        .write_all(&(to_up.len() as u16).to_le_bytes())
+                                        .await?;
+                                    write_tunneled.write_all(&to_up).await?;
+                                    write_tunneled.flush().await?;
+                                }
+                                #[allow(unreachable_code)]
+                                anyhow::Ok(())
+                            };
+                            let dn_loop = async {
+                                loop {
+                                    let mut len_buf = [0u8; 2];
+                                    read_tunneled.read_exact(&mut len_buf).await?;
+                                    let len = u16::from_le_bytes(len_buf) as usize;
+                                    let mut buf = vec![0u8; len];
+                                    read_tunneled.read_exact(&mut buf).await?;
+                                    captured.send(&buf).await?;
+                                }
+                                #[allow(unreachable_code)]
+                                anyhow::Ok(())
+                            };
+                            (up_loop, dn_loop).race().await
                         }
-                    } else {
-                        let tunneled = open_conn(&ctx_clone, "udp", &peer_addr.to_string()).await?;
-                        let (mut read_tunneled, mut write_tunneled) = tokio::io::split(tunneled);
-                        let up_loop = async {
-                            loop {
-                                let to_up = captured.recv().await?;
-                                write_tunneled
-                                    .write_all(&(to_up.len() as u16).to_le_bytes())
-                                    .await?;
-                                write_tunneled.write_all(&to_up).await?;
-                                write_tunneled.flush().await?;
-                            }
-                            #[allow(unreachable_code)]
-                            anyhow::Ok(())
-                        };
-                        let dn_loop = async {
-                            loop {
-                                let mut len_buf = [0u8; 2];
-                                read_tunneled.read_exact(&mut len_buf).await?;
-                                let len = u16::from_le_bytes(len_buf) as usize;
-                                let mut buf = vec![0u8; len];
-                                read_tunneled.read_exact(&mut buf).await?;
-                                captured.send(&buf).await?;
-                            }
-                            #[allow(unreachable_code)]
-                            anyhow::Ok(())
-                        };
-                        (up_loop, dn_loop).race().await
                     }
+                    .await;
+
+                    if let Err(error) = &result {
+                        tracing::debug!(
+                            local_addr = display(local_addr),
+                            peer_addr = display(peer_addr),
+                            error = debug(error),
+                            "UDP VPN forwarding ended"
+                        );
+                    }
+
+                    result
                 });
                 if let Some(task_limit) = ctx.init().task_limit {
                     add_task(task_limit, task);

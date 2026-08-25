@@ -118,8 +118,7 @@ pub unsafe extern "C" fn send_pkt(pkt: *const c_char, pkt_len: c_int) -> c_int {
     let slice: &'static [u8] =
         unsafe { std::slice::from_raw_parts(pkt as *mut u8, pkt_len as usize) };
     if let Some(client) = CLIENT.get()
-        && let Ok(_) =
-            geph5_rt::block_on(client.send_vpn_packet(Bytes::copy_from_slice(slice)))
+        && let Ok(_) = geph5_rt::block_on(client.send_vpn_packet(Bytes::copy_from_slice(slice)))
     {
         return 0;
     }

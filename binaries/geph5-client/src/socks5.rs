@@ -27,8 +27,7 @@ pub async fn socks5_loop(ctx: &AnyCtx<Config>) -> anyhow::Result<()> {
         let mut listener = sillad::tcp::TcpListener::bind(listen_addr).await?;
         // Owns the per-connection handlers so they are all cancelled when this
         // loop's future is dropped (replaces the old `nursery!` scoped executor).
-        let reaper: geph5_rt::TaskReaper<anyhow::Result<()>> =
-            geph5_rt::TaskReaper::new();
+        let reaper: geph5_rt::TaskReaper<anyhow::Result<()>> = geph5_rt::TaskReaper::new();
         loop {
             let client = listener.accept().await?;
             let ctx_clone = ctx.clone();

@@ -20,7 +20,10 @@ async fn ctl<T, E: std::fmt::Debug>(
 }
 
 fn epoch_ms() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -51,13 +54,19 @@ fn main() -> anyhow::Result<()> {
         ctl(client.apply_settings(settings, SessionContext::default())).await?;
         let apply = t0.elapsed();
         let ret_wall = epoch_ms();
-        println!("APPLY_RETURN epoch_ms={ret_wall}  (+{:.3}s)", apply.as_secs_f64());
+        println!(
+            "APPLY_RETURN epoch_ms={ret_wall}  (+{:.3}s)",
+            apply.as_secs_f64()
+        );
 
         // Grab the engine's whole ring immediately.
         let logs = ctl(client.logs(5000)).await?;
         let grab_wall = epoch_ms();
         println!("LOGS_GRABBED epoch_ms={grab_wall}  ({} lines)", logs.len());
-        println!("--- reference: APPLY_START in UTC was {} ms after epoch ---", start_wall);
+        println!(
+            "--- reference: APPLY_START in UTC was {} ms after epoch ---",
+            start_wall
+        );
         println!("--- (engine log timestamps are ISO-8601 Z; compare to APPLY_START/RETURN) ---");
 
         // Print only messages + timestamps, trimmed, to keep it readable, and flag
@@ -71,17 +80,14 @@ fn main() -> anyhow::Result<()> {
                 .and_then(|s| s.split('"').next())
                 .unwrap_or("");
             // seconds-in-day for gap detection: parse HH:MM:SS.fff out of ...THH:MM:SS.ffffffZ
-            let secs = ts
-                .split('T')
-                .nth(1)
-                .map(|hms| {
-                    let hms = hms.trim_end_matches('Z');
-                    let mut it = hms.split(':');
-                    let h: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
-                    let m: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
-                    let s: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
-                    h * 3600.0 + m * 60.0 + s
-                });
+            let secs = ts.split('T').nth(1).map(|hms| {
+                let hms = hms.trim_end_matches('Z');
+                let mut it = hms.split(':');
+                let h: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
+                let m: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
+                let s: f64 = it.next().unwrap_or("0").parse().unwrap_or(0.0);
+                h * 3600.0 + m * 60.0 + s
+            });
             let msg = line
                 .split("\"message\":\"")
                 .nth(1)
@@ -94,7 +100,11 @@ fn main() -> anyhow::Result<()> {
                 .unwrap_or("");
             if let Some(s) = secs {
                 let gap = prev.map(|p| s - p).unwrap_or(0.0);
-                let flag = if gap >= 1.0 { format!("  <<< GAP {gap:.2}s") } else { String::new() };
+                let flag = if gap >= 1.0 {
+                    format!("  <<< GAP {gap:.2}s")
+                } else {
+                    String::new()
+                };
                 println!("{ts}  [{target}] {msg}{flag}");
                 prev = Some(s);
             } else {

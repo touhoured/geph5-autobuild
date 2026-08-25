@@ -27,12 +27,12 @@ use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _
 mod allow;
 mod auth;
 mod broker;
+mod direct_count;
+mod google_selfcheck;
 mod listen;
 mod proxy;
 mod ratelimit;
 mod schedlag;
-mod google_selfcheck;
-mod direct_count;
 
 #[cfg(target_env = "musl")]
 #[global_allocator]

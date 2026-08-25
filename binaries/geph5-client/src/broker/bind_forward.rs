@@ -84,10 +84,7 @@ async fn splice(downstream: TcpPipe, dests: &[SocketAddr]) -> anyhow::Result<()>
     let (read_up, write_up) = tokio::io::split(upstream);
     // try_join, not race: a half-close in one direction must not drop the other;
     // an error in either still short-circuits.
-    (
-        litecopy(read_down, write_up),
-        litecopy(read_up, write_down),
-    )
+    (litecopy(read_down, write_up), litecopy(read_up, write_down))
         .try_join()
         .await?;
     Ok(())

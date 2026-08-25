@@ -49,6 +49,8 @@ async fn run_inner(command: Command) -> anyhow::Result<()> {
         | Command::ApplyProxy { .. }
         | Command::RegisterManager
         | Command::UnregisterManager => unreachable!("handled in main"),
+        #[cfg(target_os = "windows")]
+        Command::ManagerService => unreachable!("handled in main"),
 
         Command::Login { secret } => {
             let secret = match secret {

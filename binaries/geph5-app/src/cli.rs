@@ -14,8 +14,13 @@ pub enum Command {
     /// Run the privileged supervising manager (must be run as root).
     Manager,
 
+    /// Internal Windows Service Control Manager entry point.
+    #[cfg(target_os = "windows")]
+    #[command(name = "__manager-service", hide = true)]
+    ManagerService,
+
     /// Register the manager to run in the background across logins and reboots
-    /// (systemd on Linux, a boot-time scheduled task on Windows; must be run as
+    /// (systemd on Linux, a Windows service on Windows; must be run as
     /// root/Administrator).
     RegisterManager,
     /// Remove the manager's background registration (must be run as

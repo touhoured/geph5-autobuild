@@ -12,10 +12,7 @@
 //! stable signals (redirects to /sorry/, HTTP 429, playability status) rather
 //! than page markup wherever possible.
 
-use std::{
-    sync::Mutex,
-    time::Duration,
-};
+use std::{sync::Mutex, time::Duration};
 
 use geph5_broker_protocol::StatEvent;
 
@@ -31,7 +28,8 @@ const ACCEPT: &str =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8";
 /// Pre-accepted Google consent cookies, used to retry through the EU consent
 /// wall (which is region-dependent, not a reputational block).
-const CONSENT_COOKIES: &str = "CONSENT=YES+cb.20220301-11-p0.en+FX+700; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg";
+const CONSENT_COOKIES: &str =
+    "CONSENT=YES+cb.20220301-11-p0.en+FX+700; SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg";
 
 /// Benign queries, rotated so the probe doesn't send the exact same request
 /// every 10 minutes forever.
@@ -80,9 +78,18 @@ pub fn google_selfcheck_stat_events(server_name: &str, level: &str) -> Vec<StatE
     let as_gauge = |name: &str, val: Option<bool>| {
         val.map(|v| StatEvent::gauge(name, exit_tag, if v { 1.0 } else { 0.0 }))
     };
-    events.extend(as_gauge("google_selfcheck_search_captcha", state.google_captcha));
-    events.extend(as_gauge("google_selfcheck_youtube_captcha", state.youtube_captcha));
-    events.extend(as_gauge("google_selfcheck_youtube_signin", state.youtube_signin));
+    events.extend(as_gauge(
+        "google_selfcheck_search_captcha",
+        state.google_captcha,
+    ));
+    events.extend(as_gauge(
+        "google_selfcheck_youtube_captcha",
+        state.youtube_captcha,
+    ));
+    events.extend(as_gauge(
+        "google_selfcheck_youtube_signin",
+        state.youtube_signin,
+    ));
     events.extend(as_gauge("google_selfcheck_error", state.probe_error));
     if let Some(country) = &state.google_country {
         let configured = CONFIG_FILE.wait().country.alpha2().to_uppercase();
@@ -252,9 +259,7 @@ fn search_country_from_host(url: &reqwest::Url) -> Option<String> {
     }
 }
 
-async fn probe_youtube(
-    client: &reqwest::Client,
-) -> anyhow::Result<(ProbeStatus, Option<String>)> {
+async fn probe_youtube(client: &reqwest::Client) -> anyhow::Result<(ProbeStatus, Option<String>)> {
     let url = format!(
         "https://www.youtube.com/watch?v={}&hl=en",
         CONFIG_FILE.wait().google_selfcheck_video
@@ -426,19 +431,20 @@ mod tests {
 
     #[test]
     fn detects_hk_redirect_as_mainland_china() {
-        let cn: reqwest::Url =
-            "https://www.google.com.hk/search?q=test&hl=en".parse().unwrap();
+        let cn: reqwest::Url = "https://www.google.com.hk/search?q=test&hl=en"
+            .parse()
+            .unwrap();
         assert_eq!(search_country_from_host(&cn), Some("CN".to_string()));
         let cn2: reqwest::Url = "https://www.google.cn/".parse().unwrap();
         assert_eq!(search_country_from_host(&cn2), Some("CN".to_string()));
-        let normal: reqwest::Url =
-            "https://www.google.com/search?q=test".parse().unwrap();
+        let normal: reqwest::Url = "https://www.google.com/search?q=test".parse().unwrap();
         assert_eq!(search_country_from_host(&normal), None);
     }
 
     #[test]
     fn extracts_balanced_json_with_braces_in_strings() {
-        let body = r#"x = 1; ytInitialPlayerResponse = {"a":"{ not a real brace }","b":{"c":1}}; y = 2;"#;
+        let body =
+            r#"x = 1; ytInitialPlayerResponse = {"a":"{ not a real brace }","b":{"c":1}}; y = 2;"#;
         assert_eq!(
             extract_json_object(body, "ytInitialPlayerResponse"),
             Some(r#"{"a":"{ not a real brace }","b":{"c":1}}"#)

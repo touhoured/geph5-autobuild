@@ -427,11 +427,18 @@ mod tests {
         assert_eq!(msg[OFF_VERSION], RTM_VERSION);
         assert_eq!(msg[OFF_TYPE], RTM_ADD);
         assert_eq!(get_i32(&msg, OFF_SEQ), 7);
-        assert_eq!(get_i32(&msg, OFF_ADDRS), RTA_DST | RTA_GATEWAY | RTA_NETMASK);
+        assert_eq!(
+            get_i32(&msg, OFF_ADDRS),
+            RTA_DST | RTA_GATEWAY | RTA_NETMASK
+        );
         let flags = get_i32(&msg, OFF_FLAGS);
         assert_ne!(flags & RTF_UP, 0);
         assert_ne!(flags & RTF_STATIC, 0);
-        assert_eq!(flags & RTF_GATEWAY, 0, "interface routes are not RTF_GATEWAY");
+        assert_eq!(
+            flags & RTF_GATEWAY,
+            0,
+            "interface routes are not RTF_GATEWAY"
+        );
         assert_eq!(flags & RTF_IFSCOPE, 0);
         // dst sockaddr
         assert_eq!(msg[RT_MSGHDR_LEN], 16);

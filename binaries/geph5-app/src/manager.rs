@@ -602,24 +602,13 @@ async fn shutdown_teardown(inner: &Mutex<Inner>, teardown_lock: &Mutex<()>) {
 }
 
 /// Run the manager forever: spawn the children and serve the CLI control protocol.
-pub async fn run_manager() -> anyhow::Result<()> {
+pub async fn run_manager<S, R>(shutdown: S, on_ready: R) -> anyhow::Result<()>
+where
+    S: std::future::Future<Output = ()> + Send,
+    R: FnOnce() + Send + 'static,
+{
     let manager = ManagerImpl::start()?;
     let teardown_lock = std::sync::Arc::new(Mutex::new(()));
-
-    // Graceful shutdown: on a termination signal, tear the VPN down and exit. Without
-    // this, Ctrl-C would leave the kill switch / routes / DNS in place and strand the
-    // machine offline until the manager is restarted.
-    {
-        let inner = manager.inner.clone();
-        let teardown_lock = teardown_lock.clone();
-        geph5_rt::spawn(async move {
-            platform::shutdown_signal().await;
-            tracing::warn!("termination signal received; tearing down manager state and exiting");
-            shutdown_teardown(&inner, &teardown_lock).await;
-            std::process::exit(0);
-        })
-        .detach();
-    }
 
     // One monitor loop for all platforms. Native event/poll cadence and probe
     // details stay in vpn.rs; potentially blocking route inspection runs while
@@ -723,8 +712,19 @@ pub async fn run_manager() -> anyhow::Result<()> {
     }
 
     let inner = manager.inner.clone();
-    let result = platform::serve_manager(manager).await;
-    tracing::warn!("manager control server exited; tearing down installed state");
+    let serve = platform::serve_manager(manager, on_ready);
+    tokio::pin!(serve);
+    tokio::pin!(shutdown);
+    let result = tokio::select! {
+        _ = &mut shutdown => {
+            tracing::warn!("manager shutdown requested; tearing down installed state");
+            Ok(())
+        }
+        result = &mut serve => {
+            tracing::warn!("manager control server exited; tearing down installed state");
+            result
+        }
+    };
     shutdown_teardown(&inner, &teardown_lock).await;
     result
 }

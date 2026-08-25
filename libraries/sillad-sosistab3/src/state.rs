@@ -177,9 +177,7 @@ impl State {
         if actual_length > MAX_FRAME_LEN {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
-                format!(
-                    "frame length {actual_length} exceeds maximum of {MAX_FRAME_LEN}"
-                ),
+                format!("frame length {actual_length} exceeds maximum of {MAX_FRAME_LEN}"),
             ));
         }
 

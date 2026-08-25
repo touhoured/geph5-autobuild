@@ -43,9 +43,11 @@ async fn once_wire(wire: impl Pipe) -> anyhow::Result<()> {
     for stream_count in 0u64.. {
         let stream = mux.accept().await?;
         eprintln!("accepted stream {stream_count} from wire {wire_count}");
-        geph5_rt::spawn(once_stream(wire_count, stream_count, stream).inspect_err(
-            move |err| eprintln!("stream {wire_count}/{stream_count} died: {:?}", err),
-        ))
+        geph5_rt::spawn(
+            once_stream(wire_count, stream_count, stream).inspect_err(move |err| {
+                eprintln!("stream {wire_count}/{stream_count} died: {:?}", err)
+            }),
+        )
         .detach();
     }
     unreachable!()

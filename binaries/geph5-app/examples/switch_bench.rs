@@ -22,9 +22,7 @@ use std::{
 };
 
 use geph5_broker_protocol::ExitConstraint;
-use geph5_misc_rpc::manager_control::{
-    self, ExitInfo, SessionContext, Status, TunnelSettings,
-};
+use geph5_misc_rpc::manager_control::{self, ExitInfo, SessionContext, Status, TunnelSettings};
 use isocountry::CountryCode;
 
 const LOG_PATH: &str = r"Z:\switch-bench.log";
@@ -98,7 +96,11 @@ fn spawn_probe(log: Log) {
             if last != Some(ok) {
                 log.line(format!(
                     "    PROBE {}",
-                    if ok { "UP  (internet reachable)" } else { "DOWN (internet blocked)" }
+                    if ok {
+                        "UP  (internet reachable)"
+                    } else {
+                        "DOWN (internet blocked)"
+                    }
                 ));
                 last = Some(ok);
             }
@@ -134,7 +136,9 @@ fn main() -> anyhow::Result<()> {
                 a.level
             }
             Err(e) => {
-                log.line(format!("account lookup failed ({e:#}); assuming all exits usable"));
+                log.line(format!(
+                    "account lookup failed ({e:#}); assuming all exits usable"
+                ));
                 "plus".into()
             }
         };
@@ -150,7 +154,10 @@ fn main() -> anyhow::Result<()> {
             .collect();
         log.line(format!("{} distinct usable exits", usable.len()));
         if usable.len() < 2 {
-            anyhow::bail!("need at least 2 usable exits to switch between; got {}", usable.len());
+            anyhow::bail!(
+                "need at least 2 usable exits to switch between; got {}",
+                usable.len()
+            );
         }
 
         // Start probing real reachability before we perturb anything.
@@ -166,7 +173,10 @@ fn main() -> anyhow::Result<()> {
             let cc = match CountryCode::for_alpha2(&target.country) {
                 Ok(cc) => cc,
                 Err(_) => {
-                    log.line(format!("skip exit with bad country code {}", target.country));
+                    log.line(format!(
+                        "skip exit with bad country code {}",
+                        target.country
+                    ));
                     continue;
                 }
             };
@@ -203,7 +213,11 @@ fn main() -> anyhow::Result<()> {
                 let st = ctl(client.status()).await?;
                 let lbl = state_label(&st);
                 if lbl != last_state {
-                    log.line(format!("    status: {} (t+{:.3}s)", lbl, t0.elapsed().as_secs_f64()));
+                    log.line(format!(
+                        "    status: {} (t+{:.3}s)",
+                        lbl,
+                        t0.elapsed().as_secs_f64()
+                    ));
                     last_state = lbl;
                 }
                 if matches!(st.state, manager_control::ConnState::Connected) {
@@ -245,7 +259,10 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Restore the original exit.
-        log.line(format!("restoring original exit: {}", constraint_label(&base.exit_constraint)));
+        log.line(format!(
+            "restoring original exit: {}",
+            constraint_label(&base.exit_constraint)
+        ));
         let _ = ctl(client.apply_settings(base.clone(), SessionContext::default())).await;
 
         // Summary.
@@ -256,11 +273,21 @@ fn main() -> anyhow::Result<()> {
             let n = durations.len() as f64;
             let apply_avg = durations.iter().map(|(a, _)| a.as_secs_f64()).sum::<f64>() / n;
             let conn_avg = durations.iter().map(|(_, c)| c.as_secs_f64()).sum::<f64>() / n;
-            let apply_max = durations.iter().map(|(a, _)| a.as_secs_f64()).fold(0.0, f64::max);
-            let conn_max = durations.iter().map(|(_, c)| c.as_secs_f64()).fold(0.0, f64::max);
+            let apply_max = durations
+                .iter()
+                .map(|(a, _)| a.as_secs_f64())
+                .fold(0.0, f64::max);
+            let conn_max = durations
+                .iter()
+                .map(|(_, c)| c.as_secs_f64())
+                .fold(0.0, f64::max);
             log.line(format!("switches measured: {}", durations.len()));
-            log.line(format!("apply_settings (control-plane reconcile): avg {apply_avg:.3}s  max {apply_max:.3}s"));
-            log.line(format!("time to Connected (full):                 avg {conn_avg:.3}s  max {conn_max:.3}s"));
+            log.line(format!(
+                "apply_settings (control-plane reconcile): avg {apply_avg:.3}s  max {apply_max:.3}s"
+            ));
+            log.line(format!(
+                "time to Connected (full):                 avg {conn_avg:.3}s  max {conn_max:.3}s"
+            ));
             log.line("(real internet-down windows are the PROBE DOWN->UP gaps above)");
         }
         log.line("=== done ===");
