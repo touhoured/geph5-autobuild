@@ -3253,9 +3253,9 @@ checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 
 [[package]]
 name = "ipstack-geph"
-version = "0.3.3"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8511a7fc27f095823784e7f2a1a37697d29e97cb8d1e9622693166b93c46ca34"
+checksum = "13394651b3b4f254c78f9e60afd59cd063e4f3325231f37fc65d9a4158c53cc5"
 dependencies = [
  "ahash",
  "anyhow",
