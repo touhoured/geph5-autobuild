@@ -6,99 +6,88 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
-env:
-  UPSTREAM_REPOSITORY: geph-official/geph5
-  UPSTREAM_BRANCH: master
-
 jobs:
   sync:
-    name: Sync upstream
+    name: Sync
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout mirror
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: master
-          fetch-depth: 0
           token: ${{ secrets.PAT }}
+          fetch-depth: 0
 
-      - name: Synchronize branch and tags
+      - name: Sync upstream
         shell: bash
         run: |
           set -euo pipefail
-          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
-          git fetch upstream "${UPSTREAM_BRANCH}" --tags --force --prune
+          git remote add upstream https://github.com/geph-official/geph5.git
+          git fetch upstream master --tags --force --prune
 
           git checkout master
-          git reset --hard "upstream/${UPSTREAM_BRANCH}"
+          git reset --hard upstream/master
           git push origin master --force
 
-          # Mirror tags, including deleting tags removed upstream.
+          # Keep the fork's tags in sync with upstream.
           git fetch upstream --tags --force --prune --prune-tags
           git push origin --tags --force
 
   common:
-    name: Prepare release
+    name: Common
     needs: sync
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
-      hash: ${{ steps.metadata.outputs.hash }}
-      short: ${{ steps.metadata.outputs.short }}
-      tag_name: ${{ steps.metadata.outputs.tag_name }}
-      version: ${{ steps.metadata.outputs.version }}
+      hash: ${{ steps.getenv.outputs.hash }}
+      short: ${{ steps.getenv.outputs.short_hash }}
+      tag_name: ${{ steps.getenv.outputs.tag_name }}
+      version: ${{ steps.getenv.outputs.version }}
     steps:
-      - name: Checkout upstream source
+      - name: Checkout latest upstream source
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.UPSTREAM_REPOSITORY }}
-          ref: ${{ env.UPSTREAM_BRANCH }}
+          repository: geph-official/geph5
           fetch-depth: 0
 
-      - name: Read source metadata
-        id: metadata
+      - name: Get environment variable
+        id: getenv
         shell: bash
         run: |
           set -euo pipefail
-          hash="$(git rev-parse HEAD)"
-          short="$(git rev-parse --short HEAD)"
-          tag_name="$(git describe --tags --abbrev=0 --match 'geph5-client-*')"
-          # Keep the version format used by the official packaging scripts:
-          # VERSION is the git tag with the leading v removed.
-          version="${tag_name#geph5-client-}"
-          version="${version#v}"
+          echo "hash=$(git log --pretty=format:%H -n 1)" >> "$GITHUB_OUTPUT"
+          echo "short_hash=$(git log --pretty=format:%h -n 1)" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$(git describe --tags --abbrev=0 --match 'geph5-client-*')" >> "$GITHUB_OUTPUT"
+          echo "version=$(git describe --tags --abbrev=0 --match 'geph5-client-*' | cut -d - -f 3)" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "hash=$hash"
-            echo "short=$short"
-            echo "tag_name=$tag_name"
-            echo "version=$version"
-          } >> "$GITHUB_OUTPUT"
+      - name: Checkout packaging repository
+        uses: actions/checkout@v4
 
-      - name: Recreate daily release
+      - name: Delete daily
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete daily --repo "${{ github.repository }}" --yes --cleanup-tag || true
-          gh release create daily \
-            --repo "${{ github.repository }}" \
-            --generate-notes --prerelease --target "${{ steps.metadata.outputs.hash }}"
+        continue-on-error: true
+        run: gh release delete daily --repo "${{ github.repository }}" --yes --cleanup-tag
 
-      - name: Create versioned release
+      - name: Create daily
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "${{ steps.metadata.outputs.tag_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
-            gh release create "${{ steps.metadata.outputs.tag_name }}" \
-              --repo "${{ github.repository }}" \
-              --generate-notes --target "${{ steps.metadata.outputs.hash }}"
+        run: gh release create daily --repo "${{ github.repository }}" --generate-notes --prerelease --target "${{ steps.getenv.outputs.hash }}"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
+        run: gh release create "${{ steps.getenv.outputs.tag_name }}" --repo "${{ github.repository }}" --generate-notes --target "${{ steps.getenv.outputs.hash }}"
 
   build:
     name: Build ${{ matrix.target }}
     needs: common
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     env:
       hash: ${{ needs.common.outputs.hash }}
       short: ${{ needs.common.outputs.short }}
@@ -116,70 +105,94 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
-
     steps:
-      - name: Checkout source
+      - name: Checkout latest source
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.UPSTREAM_REPOSITORY }}
-          ref: ${{ env.UPSTREAM_BRANCH }}
+          repository: geph-official/geph5
           fetch-depth: 0
 
-      - name: Install Rust target
-        shell: bash
-        run: rustup target add "${{ matrix.target }}"
-
       - name: Install Cross
-        if: runner.os == 'Linux'
         shell: bash
         run: cargo install cross --locked
 
-      # Match gephgui-pkg/build-windows.bash: build the manager and engine
-      # together, and enable the aws_lambda feature required by the client.
-      - name: Build binaries
+      # First build: build the latest commit and publish it to daily.
+      # geph5-app is intentionally built together with geph5-client, matching
+      # the official packaging script's package selection.
+      - name: Build latest binaries
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cargo build --locked --release \
-              --target "${{ matrix.target }}" \
-              -p geph5-app -p geph5-client \
-              --features geph5-client/aws_lambda
-          else
-            cross build --locked --release \
-              --target "${{ matrix.target }}" \
-              -p geph5-app -p geph5-client \
-              --features geph5-client/aws_lambda
-          fi
+          cross build --locked --release \
+            --target "${{ matrix.target }}" \
+            -p geph5-app -p geph5-client \
+            --features geph5-client/aws_lambda
 
-      - name: Package artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          output="target/${{ matrix.target }}/release"
-          mkdir -p packaged
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "packaged/geph5-${{ matrix.target }}-${version}.zip" \
-              "$output/geph5.exe" "$output/geph5-client.exe"
-          else
-            tar -czf "packaged/geph5-${{ matrix.target }}-${version}.tar.gz" \
-              -C "$output" geph5 geph5-client
-          fi
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: geph5-${{ matrix.target }}
-          path: packaged/*
+          name: geph5-latest-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/geph5-client.exe
+            target/${{ matrix.target }}/release/geph5-client
+            target/${{ matrix.target }}/release/geph5.exe
+            target/${{ matrix.target }}/release/geph5
 
-      - name: Upload daily release
+      - name: Package latest binaries
+        shell: bash
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "geph5-client-${{ matrix.target }}-${short}.zip" geph5-client.exe
+            7z a "geph5-app-${{ matrix.target }}-${short}.zip" geph5.exe
+          else
+            tar -czf "geph5-client-${{ matrix.target }}-${short}.tar.gz" geph5-client
+            tar -czf "geph5-app-${{ matrix.target }}-${short}.tar.gz" geph5
+          fi
+
+      - name: Upload latest binaries to daily
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
-        run: gh release upload daily --repo "${{ github.repository }}" packaged/* --clobber
+        run: |
+          gh release upload daily --repo "${{ github.repository }}" \
+            --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-* \
+            target/${{ matrix.target }}/release/geph5-app-${{ matrix.target }}-*
 
-      - name: Upload versioned release
+      # Second build: reset to the newest release tag, then build and publish
+      # the tagged client and geph5-app to the versioned release.
+      - name: Reset to latest tag
+        shell: bash
+        run: git reset --hard "${tag_name}"
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cross build --locked --release \
+            --target "${{ matrix.target }}" \
+            -p geph5-app -p geph5-client \
+            --features geph5-client/aws_lambda
+
+      - name: Package release binaries
+        shell: bash
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "geph5-client-${{ matrix.target }}-${version}.zip" geph5-client.exe
+            7z a "geph5-app-${{ matrix.target }}-${version}.zip" geph5.exe
+          else
+            tar -czf "geph5-client-${{ matrix.target }}-${version}.tar.gz" geph5-client
+            tar -czf "geph5-app-${{ matrix.target }}-${version}.tar.gz" geph5
+          fi
+
+      - name: Upload release binaries
         env:
           GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
         shell: bash
-        run: gh release upload "${tag_name}" --repo "${{ github.repository }}" packaged/* --clobber
+        run: |
+          gh release upload "${tag_name}" --repo "${{ github.repository }}" \
+            --clobber target/${{ matrix.target }}/release/geph5-client-${{ matrix.target }}-${version}.* \
+            target/${{ matrix.target }}/release/geph5-app-${{ matrix.target }}-${version}.*
