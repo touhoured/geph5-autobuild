@@ -1956,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "geph5-app"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2015,7 +2015,7 @@ dependencies = [
  "once_cell",
  "oneshot",
  "picomux",
- "rand 0.8.8",
+ "rand 0.9.5",
  "reqwest",
  "scopeguard",
  "serde",
@@ -2060,7 +2060,7 @@ dependencies = [
  "once_cell",
  "oneshot",
  "pollster",
- "rand 0.8.8",
+ "rand 0.9.5",
  "reqwest",
  "rusty_pool",
  "semver",
@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "geph5-broker-protocol"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "geph5-client"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyctx",
  "anyhow",
@@ -2169,7 +2169,8 @@ dependencies = [
  "pin-project",
  "prefix-trie",
  "psl",
- "rand 0.8.8",
+ "rand 0.9.5",
+ "rand_core 0.6.4",
  "rcgen",
  "reqwest",
  "rlimit",
@@ -2241,7 +2242,8 @@ dependencies = [
  "oneshot",
  "picomux",
  "quanta",
- "rand 0.8.8",
+ "rand 0.9.5",
+ "rand_core 0.6.4",
  "rcgen",
  "reqwest",
  "scopeguard",
@@ -2283,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "geph5-misc-rpc"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2334,7 +2336,7 @@ dependencies = [
  "once_cell",
  "oneshot",
  "picomux",
- "rand 0.8.8",
+ "rand 0.9.5",
  "rcgen",
  "scopeguard",
  "serde",
@@ -2357,14 +2359,14 @@ dependencies = [
 
 [[package]]
 name = "geph5-rt"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "async-channel",
  "bytes",
  "futures-concurrency",
  "futures-util",
  "pin-project-lite",
- "rand 0.8.8",
+ "rand 0.9.5",
  "tokio",
 ]
 
@@ -2908,9 +2910,9 @@ checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 
 [[package]]
 name = "ipstack-geph"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13394651b3b4f254c78f9e60afd59cd063e4f3325231f37fc65d9a4158c53cc5"
+checksum = "c2ac4a33147f06abf53f6717a3a3e85ac58cc22cc5790529b4603bae94750c4d"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2921,7 +2923,7 @@ dependencies = [
  "log",
  "moka",
  "parking_lot",
- "rand 0.8.8",
+ "rand 0.9.5",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -3215,12 +3217,12 @@ dependencies = [
 
 [[package]]
 name = "mizaru2"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "blake3",
  "blind-rsa-signatures",
  "hex",
- "rand 0.8.8",
+ "rand 0.9.5",
  "rayon",
  "serde",
  "stdcode",
@@ -3276,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "nanorpc-sillad"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3641,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "picomux"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -4677,7 +4679,7 @@ dependencies = [
 
 [[package]]
 name = "sillad"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4685,7 +4687,7 @@ dependencies = [
  "futures-util",
  "libc",
  "pin-project",
- "rand 0.8.8",
+ "rand 0.9.5",
  "socket2 0.5.10",
  "tokio",
  "tracing",
@@ -4694,7 +4696,7 @@ dependencies = [
 
 [[package]]
 name = "sillad-conntest"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-trait",
  "futures-concurrency",
@@ -4708,7 +4710,7 @@ dependencies = [
 
 [[package]]
 name = "sillad-hex"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "geph5-rt",
@@ -4720,7 +4722,7 @@ dependencies = [
 
 [[package]]
 name = "sillad-meeklike"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -4739,7 +4741,7 @@ dependencies = [
  "hyper-util",
  "parking_lot",
  "pin-project",
- "rand 0.8.8",
+ "rand 0.9.5",
  "scopeguard",
  "serde",
  "sillad",
@@ -4752,7 +4754,7 @@ dependencies = [
 
 [[package]]
 name = "sillad-native-tls"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-trait",
  "geph5-rt",
@@ -4766,7 +4768,7 @@ dependencies = [
 
 [[package]]
 name = "sillad-sosistab3"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "arrayref",
@@ -4779,7 +4781,8 @@ dependencies = [
  "hex",
  "once_cell",
  "pin-project",
- "rand 0.8.8",
+ "rand 0.9.5",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
  "sillad",

@@ -66,8 +66,8 @@ impl RpcTransport for FrontedHttpTransport {
 }
 
 fn random_padding_header() -> String {
-    let mut rng = rand::thread_rng();
-    let mut bytes = vec![0u8; rng.gen_range(7..=375)];
+    let mut rng = rand::rng();
+    let mut bytes = vec![0u8; rng.random_range(7..=375)];
     rng.fill(bytes.as_mut_slice());
     BASE64_STANDARD_NO_PAD.encode(bytes)
 }

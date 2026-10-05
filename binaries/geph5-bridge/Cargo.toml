@@ -8,7 +8,7 @@ license = "MPL-2.0"
 geph5-misc-rpc = { path = "../../libraries/geph5-misc-rpc" }
 geph5-ip-to-asn = { path = "../../libraries/geph5-ip-to-asn" }
 picomux = { path = "../../libraries/picomux" }
-rand = "0.8.8"
+rand = "0.9.5"
 sillad = { path = "../../libraries/sillad" }
 sillad-sosistab3 = { path = "../../libraries/sillad-sosistab3" }
 geph5-rt = { path = "../../libraries/geph5-rt" }

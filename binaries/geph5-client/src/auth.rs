@@ -95,7 +95,7 @@ pub async fn auth_loop(ctx: &AnyCtx<Config>) -> anyhow::Result<()> {
             tracing::warn!(err = debug(err), "failed to refresh conn token");
             tokio::time::sleep(Duration::from_secs(10)).await;
         } else {
-            let sleep_secs = rand::thread_rng().gen_range(400..800);
+            let sleep_secs = rand::rng().random_range(400..800);
             tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
         }
     }

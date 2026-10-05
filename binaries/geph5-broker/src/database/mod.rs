@@ -34,7 +34,7 @@ pub(super) static POSTGRES: LazyLock<PgPool> = LazyLock::new(|| {
 pub async fn database_gc_loop() -> anyhow::Result<()> {
     tracing::info!("starting the database GC loop");
     loop {
-        let sleep_time = Duration::from_secs_f64(rand::thread_rng().gen_range(1.0..2.0));
+        let sleep_time = Duration::from_secs_f64(rand::rng().random_range(1.0..2.0));
         tracing::debug!("sleeping {:?}", sleep_time);
         tokio::time::sleep(sleep_time).await;
         let res = sqlx::query("delete from exits_new where expiry < extract(epoch from now())")

@@ -265,7 +265,7 @@ pub async fn run_session(ctx: AnyCtx<Config>) -> Infallible {
         let ctx = ctx.clone();
         geph5_rt::spawn(async move {
             loop {
-                let sleep_secs = rand::thread_rng().gen_range(300..3600);
+                let sleep_secs = rand::rng().random_range(300..3600);
                 tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
                 let _ = get_dialer(&ctx).await;
             }
@@ -283,16 +283,16 @@ pub async fn run_session(ctx: AnyCtx<Config>) -> Infallible {
 async fn session_worker(ctx: AnyCtx<Config>, worker_id: usize) -> Infallible {
     let mut failures = 0.0f64;
     if worker_id > 0 {
-        let jitter = rand::thread_rng().gen_range(0.0..120.0);
+        let jitter = rand::rng().random_range(0.0..120.0);
         tokio::time::sleep(Duration::from_secs_f64(jitter)).await;
     }
 
     loop {
         let wait_time = Duration::from_secs_f64(
-            (rand::thread_rng().gen_range(0.0..0.1) * failures.exp2()).min(120.0),
+            (rand::rng().random_range(0.0..0.1) * failures.exp2()).min(120.0),
         );
         let timeout_time = Duration::from_secs_f64(
-            (rand::thread_rng().gen_range(30.0..60.0) * failures.exp2()).min(120.0),
+            (rand::rng().random_range(30.0..60.0) * failures.exp2()).min(120.0),
         );
         if let Err(err) = run_session_once(&ctx, worker_id, timeout_time, &mut failures).await {
             failures += 1.0;
@@ -521,7 +521,7 @@ async fn client_auth(
         }
         None => {
             tracing::debug!(server, "requiring full authentication");
-            let my_esk = x25519_dalek::EphemeralSecret::random_from_rng(rand::thread_rng());
+            let my_esk = x25519_dalek::EphemeralSecret::random_from_rng(rand_core::OsRng);
             let client_hello = ClientHello {
                 credentials,
                 crypt_hello: ClientCryptHello::X25519((&my_esk).into()),

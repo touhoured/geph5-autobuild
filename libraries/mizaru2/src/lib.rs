@@ -14,6 +14,34 @@ use thiserror::Error;
 const KEY_COUNT: usize = 65536;
 const KEY_BITS: usize = 2048;
 
+// Preserve the RNG traits required by the public blind-rsa-signatures 0.15
+// types while sourcing randomness from rand 0.9.
+struct CryptoRng;
+
+impl brs::reexports::rand::CryptoRng for CryptoRng {}
+
+impl brs::reexports::rand::RngCore for CryptoRng {
+    fn next_u32(&mut self) -> u32 {
+        rand::RngCore::next_u32(&mut rand::rng())
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        rand::RngCore::next_u64(&mut rand::rng())
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        rand::RngCore::fill_bytes(&mut rand::rng(), dest);
+    }
+
+    fn try_fill_bytes(
+        &mut self,
+        dest: &mut [u8],
+    ) -> std::result::Result<(), brs::reexports::rand::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
@@ -52,9 +80,7 @@ impl SecretKey {
             .map(|_| {
                 let c = count.fetch_add(1, Ordering::Relaxed);
                 eprintln!("generating {name} {c}/{KEY_COUNT}");
-                brs::KeyPair::generate(&mut rand::thread_rng(), KEY_BITS)
-                    .unwrap()
-                    .sk
+                brs::KeyPair::generate(&mut CryptoRng, KEY_BITS).unwrap().sk
             })
             .collect();
         let merkle_first: Vec<blake3::Hash> = rsa_keys
@@ -77,7 +103,7 @@ impl SecretKey {
 
     /// Blind‑signs a message with the given epoch key.
     pub fn blind_sign(&self, epoch: u16, blinded: &BlindedClientToken) -> BlindedSignature {
-        let mut rng = rand::thread_rng();
+        let mut rng = CryptoRng;
         let key = self.get_subkey(epoch);
         let bare_sig = key
             .blind_sign(
@@ -210,7 +236,7 @@ impl SingleSecretKey {
     /// Generates a single RSA keypair.
     pub fn generate(name: &str) -> Self {
         eprintln!("generating single keypair for {name}");
-        let kp = brs::KeyPair::generate(&mut rand::thread_rng(), KEY_BITS).unwrap();
+        let kp = brs::KeyPair::generate(&mut CryptoRng, KEY_BITS).unwrap();
         Self {
             rsa_key_der: kp.sk.to_der().unwrap(),
         }
@@ -234,7 +260,7 @@ impl SingleSecretKey {
 
     /// Blind‑signs a blinded token.
     pub fn blind_sign(&self, blinded: &BlindedClientToken) -> SingleBlindedSignature {
-        let mut rng = rand::thread_rng();
+        let mut rng = CryptoRng;
         let key = self.get_key();
         let bare_sig = key
             .blind_sign(
@@ -343,7 +369,7 @@ impl ClientToken {
     pub fn blind(self, subkey: &brs::PublicKey) -> (BlindedClientToken, brs::Secret) {
         let res = subkey
             .blind(
-                &mut rand::thread_rng(),
+                &mut CryptoRng,
                 self.0,
                 false,
                 &brs::Options::new(brs::Hash::Sha256, true, 32),

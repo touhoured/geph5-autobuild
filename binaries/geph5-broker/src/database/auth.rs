@@ -27,7 +27,7 @@ pub async fn register_secret() -> anyhow::Result<String> {
     retry_serializable(|| async {
         let mut txn = POSTGRES.begin().await?;
         let secret = (0..23)
-            .map(|_| rand::thread_rng().gen_range(0..10))
+            .map(|_| rand::rng().random_range(0..10))
             .fold(String::from("8"), |a, b| format!("{a}{b}"));
         let (user_id,): (i32,) =
             sqlx::query_as("INSERT INTO users (createtime) VALUES (NOW()) RETURNING id")
@@ -117,7 +117,7 @@ pub async fn rotate_account_secret(current_secret: &str) -> Result<String, Accou
             }
         };
         let replacement_secret = (0..23)
-            .map(|_| rand::thread_rng().gen_range(0..10))
+            .map(|_| rand::rng().random_range(0..10))
             .fold(String::from("8"), |a, b| format!("{a}{b}"));
         sqlx::query("INSERT INTO auth_secret_history (secret_hash, user_id) VALUES ($1, $2)")
             .bind(current.as_slice())
@@ -219,7 +219,7 @@ pub async fn issue_auth_token(credential: Credential) -> Result<String, AuthErro
         let mut txn = POSTGRES.begin().await?;
         let user_id = validate_credential_in_connection(&mut txn, &credential).await?;
         let token: String = std::iter::repeat(())
-            .map(|()| rand::thread_rng().sample(rand::distributions::Alphanumeric))
+            .map(|()| rand::rng().sample(rand::distr::Alphanumeric))
             .map(char::from)
             .take(30)
             .collect();

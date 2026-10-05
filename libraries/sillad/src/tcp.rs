@@ -188,7 +188,7 @@ fn next_accept_retry_delay(delay: Duration) -> Duration {
 fn jitter_accept_retry_delay(delay: Duration) -> Duration {
     let lower_ms = delay.as_millis() as u64;
     let upper_ms = next_accept_retry_delay(delay).as_millis() as u64;
-    Duration::from_millis(rand::thread_rng().gen_range(lower_ms..=upper_ms))
+    Duration::from_millis(rand::rng().random_range(lower_ms..=upper_ms))
 }
 
 /// A HappyEyeballsTcpDialer is a dialer for TCP endpoints which tries the given addresses in sequence intelligently.

@@ -64,7 +64,7 @@ impl BridgeRateLimiter {
 }
 
 fn stochastic_kib_charge(bytes: usize) -> u32 {
-    let sample = rand::thread_rng().gen_range(0..KIB);
+    let sample = rand::rng().random_range(0..KIB);
     stochastic_kib_charge_with_sample(bytes, sample)
 }
 

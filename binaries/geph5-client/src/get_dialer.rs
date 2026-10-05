@@ -8,7 +8,7 @@ use geph5_broker_protocol::{
     JsonSigned, RouteDescriptor,
 };
 use isocountry::CountryCode;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use sillad::dialer::{DialerExt, DynDialer, FailingDialer};
 
 use crate::bound_dialer::BoundTcpDialer;
@@ -48,7 +48,7 @@ pub async fn get_dialer(
         let dest_addr = *tokio::net::lookup_host(dir)
             .await?
             .collect::<Vec<_>>()
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .context("could not resolve destination for direct exit connection")?;
         let direct_route = RouteDescriptor::ConnTest {
             ping_count: 1,

@@ -5,7 +5,7 @@ use crate::CONFIG_FILE;
 
 pub async fn new_puzzle() -> String {
     let mut bts = [0u8; 20];
-    rand::thread_rng().fill_bytes(&mut bts);
+    rand::rng().fill_bytes(&mut bts);
     hex::encode(bts)
 }
 

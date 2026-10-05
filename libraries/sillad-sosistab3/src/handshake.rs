@@ -83,7 +83,7 @@ impl Handshake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
     use x25519_dalek::EphemeralSecret;
 
     #[test]

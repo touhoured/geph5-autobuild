@@ -85,8 +85,8 @@ async fn bw_token_refresh_inner(ctx: &AnyCtx<Config>) -> anyhow::Result<()> {
                                 "cannot obtain bw token"
                             );
                             tokio::time::sleep(Duration::from_secs_f64(retry_secs)).await;
-                            retry_secs = rand::thread_rng()
-                                .gen_range(retry_secs..retry_secs * 2.0)
+                            retry_secs = rand::rng()
+                                .random_range(retry_secs..retry_secs * 2.0)
                                 .min(120.0);
                         } else {
                             break;

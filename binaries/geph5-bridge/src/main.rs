@@ -1,4 +1,5 @@
 mod asn_count;
+mod broker;
 mod listen_forward;
 mod ratelimit;
 mod stats;
@@ -14,11 +15,9 @@ use anyhow::Context as _;
 use futures_concurrency::future::Race;
 use futures_util::future::join_all;
 use geph5_broker_protocol::{BridgeDescriptor, Mac};
-use geph5_rt::TimeoutExt;
 use listen_forward::listen_forward_loop;
 use rand::Rng;
 use ratelimit::BridgeRateLimiter;
-use sillad::{dialer::DialerExt, tcp::TcpDialer};
 use sillad_sosistab3::{Cookie, listener::SosistabListener};
 use tokio::process::Command;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -61,11 +60,12 @@ fn main() {
             }
         };
         let auth_token: Arc<str> = std::env::var("GEPH5_BRIDGE_TOKEN").unwrap().into();
-        let broker_addr: SocketAddr = std::env::var("GEPH5_BROKER_ADDR").unwrap().parse().unwrap();
+        let broker_rpc = broker::client_from_env()?;
 
         {
             let auth_token = auth_token.clone();
-            geph5_rt::spawn(async move { stats::stats_flush_loop(&auth_token, broker_addr).await })
+            let broker_rpc = broker_rpc.clone();
+            geph5_rt::spawn(async move { stats::stats_flush_loop(&auth_token, broker_rpc).await })
                 .detach();
         }
 
@@ -84,7 +84,7 @@ fn main() {
             run_bridge_instance(
                 instance,
                 auth_token.clone(),
-                broker_addr,
+                broker_rpc.clone(),
                 rate_limiter.clone(),
             )
         }))
@@ -95,7 +95,7 @@ fn main() {
 }
 
 fn new_bridge_instance(advertised_ip: IpAddr, pool: String) -> BridgeInstance {
-    let port = rand::thread_rng().gen_range(1024..10000);
+    let port = rand::rng().random_range(1024..10000);
     let bind_addr = SocketAddr::new(listen_ip_for(advertised_ip), port);
     BridgeInstance {
         advertised_ip,
@@ -116,7 +116,7 @@ fn listen_ip_for(advertised_ip: IpAddr) -> IpAddr {
 async fn run_bridge_instance(
     instance: BridgeInstance,
     auth_token: Arc<str>,
-    broker_addr: SocketAddr,
+    broker_rpc: broker::Client,
     rate_limiter: BridgeRateLimiter,
 ) {
     tracing::info!(
@@ -130,7 +130,7 @@ async fn run_bridge_instance(
         instance.control_cookie.clone(),
         instance.pool.clone(),
         auth_token,
-        broker_addr,
+        broker_rpc,
     );
     let serve = async move {
         loop {
@@ -201,25 +201,12 @@ async fn broker_loop(
     control_cookie: String,
     pool: String,
     auth_token: Arc<str>,
-    broker_addr: SocketAddr,
+    broker_rpc: broker::Client,
 ) {
-    tracing::info!(
-        broker_addr = display(broker_addr),
-        pool,
-        "starting upload loop"
-    );
-
-    let broker_rpc = Arc::new(geph5_broker_protocol::BrokerClient(
-        nanorpc_sillad::DialerTransport(
-            TcpDialer {
-                dest_addr: broker_addr,
-            }
-            .timeout(Duration::from_secs(1)),
-        ),
-    ));
+    tracing::info!(pool, "starting upload loop");
 
     loop {
-        tracing::info!(broker_addr = display(broker_addr), pool, "uploading...");
+        tracing::info!(pool, "uploading...");
 
         let res = async {
             broker_rpc
@@ -236,9 +223,7 @@ async fn broker_loop(
                     },
                     blake3::hash(auth_token.as_bytes()).as_bytes(),
                 ))
-                .timeout(Duration::from_secs(2))
-                .await
-                .context("insert bridge timed out")??
+                .await?
                 .map_err(|e| anyhow::anyhow!(e))?;
             anyhow::Ok(())
         };

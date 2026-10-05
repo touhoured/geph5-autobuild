@@ -2,7 +2,7 @@
 name = "sillad"
 edition = "2024"
 description = "A framework for talking about TCP-like dialers and listeners, within the tokio-io ecosystem"
-version = "0.3.2"
+version = "0.3.3"
 repository.workspace = true
 license.workspace = true
 
@@ -13,7 +13,7 @@ futures-concurrency = "7.7.1"
 futures-util = "0.3.34"
 libc = "0.2.189"
 pin-project = "1.1.13"
-rand = "0.8.8"
+rand = "0.9.5"
 socket2 = "0.5.10"
 tokio = { version = "1.53", features = ["net", "time", "io-util"] }
 tracing = "0.1.44"

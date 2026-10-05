@@ -159,7 +159,7 @@ async fn dg_client_backhaul<D: Dialer>(
                 interval = 0.1;
             } else {
                 tracing::debug!(interval, "empty, so increasing interval");
-                interval = rand::thread_rng().gen_range(interval..interval * 2.0);
+                interval = rand::rng().random_range(interval..interval * 2.0);
                 interval = interval.min(30.0);
             }
             anyhow::Ok(())

@@ -39,8 +39,8 @@ impl Immortal {
                     RespawnStrategy::FixedDelay(delay) => tokio::time::sleep(delay).await,
                     RespawnStrategy::JitterDelay(low, high) => {
                         let low = low.min(high);
-                        let millis = rand::thread_rng()
-                            .gen_range((low.as_millis() as u64)..=(high.as_millis() as u64));
+                        let millis = rand::rng()
+                            .random_range((low.as_millis() as u64)..=(high.as_millis() as u64));
                         tokio::time::sleep(Duration::from_millis(millis)).await;
                     }
                 }

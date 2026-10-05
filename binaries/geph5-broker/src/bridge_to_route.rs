@@ -212,7 +212,7 @@ fn is_china_mobile_asn(asn: u32) -> bool {
 
 fn gencookie() -> String {
     let mut b = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut b);
+    rand::rng().fill_bytes(&mut b);
     hex::encode(b)
 }
 

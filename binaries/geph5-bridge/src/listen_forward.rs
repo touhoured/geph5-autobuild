@@ -91,7 +91,7 @@ impl BridgeControlProtocol for State {
 
 async fn random_tcp_listener(my_ip: IpAddr) -> TcpListener {
     loop {
-        let rando = rand::thread_rng().gen_range(2048u16..65535);
+        let rando = rand::rng().random_range(2048u16..65535);
         let bind_addr = SocketAddr::new(
             match my_ip {
                 IpAddr::V4(_) => "0.0.0.0".parse().unwrap(),

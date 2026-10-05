@@ -54,7 +54,7 @@ impl PresharedSecret {
 
     fn encrypt(&self, is_up: bool, data: &[u8]) -> Vec<u8> {
         let mut nonce = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce);
+        rand::rng().fill_bytes(&mut nonce);
         let mut out = if is_up {
             self.up_aead.encrypt(&nonce.into(), data).unwrap()
         } else {

@@ -72,7 +72,7 @@ impl State {
             // only add padding if the length is shorter than 2000 bytes
             if orig_len < 2000 {
                 let desired_len =
-                    (orig_len + overhead).next_power_of_two() + rand::thread_rng().gen_range(0..10);
+                    (orig_len + overhead).next_power_of_two() + rand::rng().random_range(0..10);
                 let padding_inner_len = desired_len - orig_len - overhead;
                 let lala = [0u8; 2000];
                 let padding_len = self.encrypt_inner(&lala[..padding_inner_len], output, true);
@@ -224,7 +224,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
+    use rand_core::OsRng;
     use x25519_dalek::EphemeralSecret;
 
     #[test]

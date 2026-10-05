@@ -73,7 +73,7 @@ pub fn fake_dns_allocate(ctx: &AnyCtx<Config>, dns_name: &str) -> Ipv4Addr {
 }
 
 fn random_pool_addr() -> Ipv4Addr {
-    let offset = rand::thread_rng().gen_range(0..=!FAKE_DNS_MASK);
+    let offset = rand::rng().random_range(0..=!FAKE_DNS_MASK);
     Ipv4Addr::from(FAKE_DNS_BASE | offset)
 }
 

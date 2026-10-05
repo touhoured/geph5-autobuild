@@ -61,7 +61,7 @@ async fn once_stream(wire_count: u64, stream_count: u64, mut stream: Stream) -> 
             while len > 0 {
                 let n = len.min(65536);
                 let mut buff = vec![0u8; n];
-                rand::thread_rng().fill_bytes(&mut buff);
+                rand::rng().fill_bytes(&mut buff);
                 stream.write_all(&buff).await?;
                 len = len.saturating_sub(n);
             }

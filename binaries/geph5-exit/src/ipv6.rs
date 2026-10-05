@@ -53,7 +53,7 @@ struct EyeballAddrs {
 }
 
 fn pick_eyeball_addrs(addrs: Vec<SocketAddr>) -> EyeballAddrs {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     EyeballAddrs {
         ipv6: addrs
@@ -167,7 +167,7 @@ fn random_ipv6_in_net(net: Ipv6Net) -> Ipv6Addr {
     let random_offset = if max_offset == 0 {
         0
     } else {
-        rand::thread_rng().gen_range(0..=max_offset)
+        rand::rng().random_range(0..=max_offset)
     };
 
     // Our randomly chosen address is (network_address + random_offset).

@@ -159,7 +159,7 @@ async fn handle_client(mut client: impl Pipe) -> anyhow::Result<()> {
             ExitHelloInner::SharedSecretResponse(mac)
         }
         ClientCryptHello::X25519(their_epk) => {
-            let my_esk = EphemeralSecret::random_from_rng(rand::thread_rng());
+            let my_esk = EphemeralSecret::random_from_rng(rand_core::OsRng);
             let my_epk = PublicKey::from(&my_esk);
             let shared_secret = my_esk.diffie_hellman(&their_epk);
             let read_key = blake3::derive_key("c2e", shared_secret.as_bytes());
